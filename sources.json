@@ -1,0 +1,49 @@
+{
+  "note": "Pinned source repositories for the BMW unified DB build. Each repo is cloned into <targetDir>/<name> at the exact pinned commit. Run fetch-sources.mjs to materialize, then build with BMW_REPO_ROOT=./sources. bmw-advanced-tools uses a sparse-checkout 'paths' list because the upstream repo is ~2.5GB and we only need a few files.",
+  "targetDir": "sources",
+  "repos": [
+    {
+      "name": "ediabasx-docs-sgbd",
+      "url": "https://github.com/emdzej/ediabasx-docs-sgbd",
+      "commit": "b644de8fbfbb"
+    },
+    {
+      "name": "bmw-advanced-tools",
+      "url": "https://git.0x45.cz/em/bmw-advanced-tools",
+      "commit": "f743fd5cb15e",
+      "paths": [
+        "app/EDIABAS/ECU/T_GRTB.PRG",
+        "app/EDIABAS/EnglishEcu",
+        "app/NCSEXPER",
+        "app/EC-APPS/NFS",
+        "app/EC-APPS/INPA/SGDAT",
+        "app/EC-APPS/BMWCodingTool/Translations.csv"
+      ]
+    },
+    {
+      "name": "opendbc",
+      "url": "https://github.com/BMW-E8x-E9x/opendbc",
+      "commit": "5282ed5fe6a2"
+    },
+    {
+      "name": "openpilot",
+      "url": "https://github.com/BMW-E8x-E9x/openpilot",
+      "commit": "51113899d1fb"
+    },
+    {
+      "name": "j2534",
+      "url": "https://github.com/emdzej/j2534",
+      "commit": "3422fd17654b"
+    },
+    {
+      "name": "BMW_coding",
+      "url": "https://github.com/dzid26/BMW_coding",
+      "commit": "4cd6b8ebf169"
+    },
+    {
+      "name": "diesel-x5m",
+      "url": "https://github.com/yarik-vv/diesel-x5m",
+      "commit": "057e9b4d6f6d"
+    }
+  ]
+}

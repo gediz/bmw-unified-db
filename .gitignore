@@ -1,0 +1,16 @@
+# Generated artifacts. Large and regenerable; do not commit.
+# Ship dist/bmw.sqlite as a GitHub Release asset (or Hugging Face dataset), not in the git tree.
+/dist/
+/build/
+
+# Source repos materialized by fetch-sources.mjs (cloned, not authored here).
+/sources/
+
+# Local tooling
+node_modules/
+*.log
+.DS_Store
+
+# Keep the small external source files and their licenses (these ARE committed):
+#   external/<source>/SOURCE.md, LICENSE, and the small fetched inputs (csv/xml).
+# The generated build/external/*.ndjson is covered by /build/ above.

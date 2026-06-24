@@ -1,0 +1,12 @@
+VIN layer (vin_wmi, vin_position) license
+
+This layer has two parts with different terms; see SOURCE.md for details and attribution.
+
+1. NHTSA vPIC data (rows sourced from the U.S. NHTSA Product Information Catalog / vPIC):
+   U.S. Government work, public domain. No restriction.
+
+2. Reconstructed structural rows (VIN position rules and some WMI entries) derived from the
+   ISO 3779 VIN structure and publicly documented BMW WMI assignments (e.g. Wikibooks):
+   the underlying references are CC-BY-SA-4.0. Attribute and share-alike where those rows apply.
+
+SPDX: CC-BY-SA-4.0 OR LicenseRef-public-domain
