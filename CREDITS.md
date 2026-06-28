@@ -64,7 +64,7 @@ Each lives in its own directory under its own license, is merged into `bmw.sqlit
 here and in the `data_source` table:
 
 - [OBDb](https://github.com/OBDb): live-data signal definitions and scaling. CC-BY-SA-4.0 (share-alike).
-- [packetpilot/bmw-f](https://github.com/packetpilot/bmw-f) (`FDLCodes.xml`): F-series coding labels. GPL-3.0.
+- [packetpilot/bmw-f](https://github.com/packetpilot/bmw-f) (`cheats/*.xml`): F/G-series FDL coding labels (2,674, de-duped). GPL-3.0; underlying values derive from BMW PSdZData CAFD.
 - [NHTSA vPIC](https://vpic.nhtsa.dot.gov/): VIN structural decode. US public domain.
 - [mytrile/obd-trouble-codes](https://github.com/mytrile/obd-trouble-codes): ISO 15031 / SAE J2012 generic codes. MIT.
 - [python-udsoncan](https://github.com/pylessard/python-udsoncan) by pylessard: ISO 14229 standard data identifier names. MIT.

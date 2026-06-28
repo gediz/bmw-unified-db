@@ -50,7 +50,7 @@ CREATE TABLE generic_dtc(code TEXT, description TEXT, category TEXT, is_generic 
 CREATE TABLE vin_wmi(wmi TEXT, make TEXT, brand TEXT, country TEXT, plant_hint TEXT, source TEXT);
 CREATE TABLE vin_position(position TEXT, meaning TEXT);
 CREATE TABLE uds_did_standard(did TEXT, name TEXT, range_note TEXT, source TEXT);
-CREATE TABLE fdl_code(chassis_family TEXT, ecu_or_cafd TEXT, ecu TEXT, cafd TEXT, fsw_label TEXT, value_label TEXT, value_hex TEXT, meaning TEXT, "group" TEXT, byte_start TEXT, byte_end TEXT, mask TEXT, raw_value TEXT);
+CREATE TABLE fdl_code(chassis_family TEXT, ecu_or_cafd TEXT, ecu TEXT, cafd TEXT, fsw_label TEXT, value_label TEXT, value_hex TEXT, meaning TEXT, "group" TEXT, byte_start TEXT, byte_end TEXT, mask TEXT, raw_value TEXT, series TEXT, comment TEXT);
 CREATE TABLE routing(sgbd TEXT, ecu_group TEXT, diag_address TEXT, sgbd_index TEXT, chassis TEXT,
   ecu_name TEXT, addr_raw TEXT, source TEXT, source_file TEXT);
 CREATE TABLE coding_label(ecu TEXT, chassis TEXT, fsw_label TEXT, psw_values TEXT, psw_options TEXT, meaning TEXT, source TEXT);
@@ -96,7 +96,7 @@ const TABLES = {
   vin_wmi: ['wmi','make','brand','country','plant_hint','source'],
   vin_position: ['position','meaning'],
   uds_did_standard: ['did','name','range_note','source'],
-  fdl_code: ['chassis_family','ecu_or_cafd','ecu','cafd','fsw_label','value_label','value_hex','meaning','group','byte_start','byte_end','mask','raw_value'],
+  fdl_code: ['chassis_family','ecu_or_cafd','ecu','cafd','fsw_label','value_label','value_hex','meaning','group','byte_start','byte_end','mask','raw_value','series','comment'],
 }
 const SOURCES = {
   ecu_variant:'sgbd/ecu_variant', job:'sgbd/job', uds_service:'sgbd/uds_services', job_arg:'sgbd/job_arg',
@@ -503,7 +503,7 @@ const coverage = {
   can_scope: 'can_* covers chassis group E8x_E9x only; ds2_* covers ECU MS43 only.',
   bus_confidence: 'ecu_bus per-ECU rows are heuristic (group-name based); see confidence column. CAN-message buses are high-confidence.',
 }
-const meta = { generated_from: 'bmw repo collection (ediabasx-docs-sgbd, bmw-advanced-tools, opendbc, openpilot, j2534, BMW_coding, diesel-x5m)',
+const meta = { generated_from: 'bmw repo collection (ediabasx-docs-sgbd, bmw-advanced-tools, opendbc, openpilot, j2534, BMW_coding, diesel-x5m, packetpilot/bmw-f)',
   row_counts: stats, coverage,
   flag_semantics: 'has_coding/has_flash/has_dtc/has_actuator describe what the ECU SUPPORTS (derived from its jobs); has_coding_data/coding_example_count describe whether THIS DB holds coding values for it. is_stub=1 marks a minimal record created from routing/coding when the SGBD itself was not in the decoded corpus.',
   note: 'wiring/TIS layers intentionally empty (no source data locally).' }
@@ -534,7 +534,7 @@ const SOURCE_FILES = {
   'ext-generic-dtc': 'obd-trouble-codes.csv',
   'ext-vin': 'ISO 3779/3780 + NHTSA vPIC',
   'ext-uds-did': 'python-udsoncan DID table',
-  'ext-fdl': 'FDLCodes.xml',
+  'ext-fdl': 'cheats/*.xml',
 }
 const BMW = 'BMW AG proprietary (included for interoperability / right-to-repair; removable on request)'
 const DATA_SOURCES = [
@@ -556,7 +556,7 @@ const DATA_SOURCES = [
   ['ext-generic-dtc','generic_dtc','mytrile/obd-trouble-codes (ISO 15031 / SAE J2012)','github.com/mytrile/obd-trouble-codes','MIT','MIT','Permissive. Standard generic OBD2 codes.','CSV parsed.'],
   ['ext-vin','vin_wmi, vin_position','NHTSA vPIC + ISO 3779 / Wikibooks','vpic.nhtsa.dot.gov','US public domain (vPIC); CC-BY-SA (reconstructed rows)','CC-BY-SA-4.0 OR LicenseRef-public-domain','vPIC rows public domain; reconstructed rows CC-BY-SA.','WMI table and 17-position rules compiled.'],
   ['ext-uds-did','uds_did_standard','pylessard/python-udsoncan (ISO 14229 DID names)','github.com/pylessard/python-udsoncan','MIT','MIT','Permissive. Standard DID names.','DID table extracted.'],
-  ['ext-fdl','fdl_code','packetpilot/bmw-f FDLCodes.xml','github.com/packetpilot/bmw-f','GPL-3.0','GPL-3.0-only','COPYLEFT. This layer is GPL-3.0; redistribution carries GPL-3.0 obligations.','FDLCodes.xml parsed.'],
+  ['ext-fdl','fdl_code','packetpilot/bmw-f cheats/*.xml (community FDL cheats)','github.com/packetpilot/bmw-f','GPL-3.0','GPL-3.0-only','COPYLEFT. This layer is GPL-3.0; redistribution carries GPL-3.0 obligations. Underlying byte/mask/value data derives from BMW PSdZData CAFD definitions.','All 21 cheats/*.xml parsed and de-duped on the coding write; F/G/I/RR series.'],
 ]
 { const ins = db.prepare('INSERT INTO data_source(layer,tables,origin,upstream,license,spdx,scope_note,transform,source_file) VALUES(?,?,?,?,?,?,?,?,?)')
   SQL('BEGIN'); for (const r of DATA_SOURCES) ins.run(...r, SOURCE_FILES[r[0]] ?? null); SQL('COMMIT') }

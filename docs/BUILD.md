@@ -12,7 +12,7 @@ produces a byte-identical `bmw.sqlite` with the same SHA256, printed at the end 
 Fetch the source repos at their pinned commits, then build:
 
 ```
-node fetch-sources.mjs                          # clones the 7 source repos into ./sources
+node fetch-sources.mjs                          # clones the 8 source repos into ./sources
 BMW_REPO_ROOT=./sources node --experimental-sqlite build.mjs
 ```
 

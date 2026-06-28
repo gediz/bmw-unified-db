@@ -44,6 +44,11 @@
       "name": "diesel-x5m",
       "url": "https://github.com/yarik-vv/diesel-x5m",
       "commit": "057e9b4d6f6d"
+    },
+    {
+      "name": "bmw-f",
+      "url": "https://github.com/packetpilot/bmw-f",
+      "commit": "7db51ef8d1fe"
     }
   ]
 }

@@ -133,8 +133,11 @@ These are fetched from openly licensed sources and kept under their own licenses
   ([NHTSA vPIC](https://vpic.nhtsa.dot.gov/) and ISO 3779). Public domain and ISO.
 - `uds_did_standard` (`did`): ISO 14229 standard DataIdentifier names, from
   [python-udsoncan](https://github.com/pylessard/python-udsoncan). MIT.
-- `fdl_code` (`ecu`, `fsw_label`): F-series coding labels from
-  [packetpilot/bmw-f](https://github.com/packetpilot/bmw-f). GPL-3.0.
+- `fdl_code` (`ecu`, `fsw_label`): F/G-series FDL coding labels, 2,674 across 95 CAFDs, from the
+  community cheat files in [packetpilot/bmw-f](https://github.com/packetpilot/bmw-f) `cheats/*.xml`
+  (de-duped on the coding write). `series` is the per-chassis applicability; `chassis_family` is F, G, I,
+  or RR derived from it; `byte_start`/`byte_end`/`mask`/`raw_value` are the write, `meaning` and `comment`
+  the human text. GPL-3.0; the underlying values derive from BMW PSdZData CAFD definitions.
 
 ## Views
 

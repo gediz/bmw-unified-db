@@ -18,12 +18,12 @@ gate writes behind the SFD lock, which needs a BMW-signed token this database ca
 ## What's inside
 
 2,466 BMW ECUs decoded from BMW's own diagnostic data, plus open reference layers, in 46 tables and 8
-views (about 654 MB):
+views (about 655 MB):
 
 - **Diagnostics**: every diagnostic job, argument, and result per ECU, with the UDS service bytes.
 - **Faults**: the full fault dictionary per ECU: location, type, class, and freeze-frame with
   raw-to-engineering scaling. German, with partial English.
-- **Coding**: 17,169 chassis-wide coding labels, plus applied examples and raw coding images.
+- **Coding**: 17,169 chassis-wide coding labels (E-series), 2,674 F/G-series FDL coding labels, plus applied examples and raw coding images.
 - **Routing**: the diagnostic address and variant id needed to reach each ECU.
 - **Identification**: 9,043 hardware part numbers mapped to ECUs.
 - **Live data**: INPA measurements and OBDb signals; CAN messages, signals, and checksums.
@@ -76,7 +76,7 @@ Full inventory of `dist/bmw.sqlite`, with a JSON mirror in `dist/json/`:
 | Live CAN | can_message, can_signal, can_value, can_checksum_algo | 337, 218, 100, 8 |
 | Legacy DS2 | ds2_job, ds2_fault | 69, 347 |
 | Translations | translation | 28,595 |
-| External (own licenses, see [CREDITS.md](CREDITS.md)) | obd_signal, generic_dtc, vin_wmi, vin_position, uds_did_standard, fdl_code | 663 live signals, 3,071 generic codes, VIN decode, 58 standard DIDs, 100 F-series codes |
+| External (own licenses, see [CREDITS.md](CREDITS.md)) | obd_signal, generic_dtc, vin_wmi, vin_position, uds_did_standard, fdl_code | 663 live signals, 3,071 generic codes, VIN decode, 58 standard DIDs, 2,674 F/G-series coding labels |
 | Cross-layer and search | ecu_node, chassis, chassis_variant, ecu_group, ecu_family_dim, meta, search (FTS5) | graph + dimensions |
 | Identity resolver | ecu_alias | 19,332 aliases (any identifier to an ECU) |
 | Views | v_ecu, v_fault, v_coding, v_coding_all, v_did, v_measurement, v_vehicle_ecu, v_resolve | the everyday surface |
@@ -116,7 +116,7 @@ the newest build:
 curl -L -O https://github.com/gediz/bmw-unified-db/releases/latest/download/bmw.sqlite.gz
 curl -L -O https://github.com/gediz/bmw-unified-db/releases/latest/download/SHA256SUMS
 grep bmw.sqlite.gz SHA256SUMS | sha256sum -c    # verify the download
-gunzip bmw.sqlite.gz                            # -> bmw.sqlite (654 MB)
+gunzip bmw.sqlite.gz                            # -> bmw.sqlite (655 MB)
 ```
 
 To build it yourself instead, deterministic and byte-identical, see [BUILD.md](docs/BUILD.md).

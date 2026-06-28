@@ -1,65 +1,60 @@
 #!/usr/bin/env node
-// BMW Unified DB — External Layer: FDL-F (F-series E-Sys FDL coding cheats)
+// BMW Unified DB — External Layer: FDL (F/G-series E-Sys FDL coding cheats)
 // Zero-dependency Node ESM (Node v22). Emits streaming NDJSON:
 //   build/external/fdl_code.ndjson
 //     { chassis_family, ecu_or_cafd, ecu, cafd, fsw_label, value_label,
-//       value_hex, meaning, group, byte_start, byte_end, mask, raw_value, source }
+//       value_hex, meaning, group, byte_start, byte_end, mask, raw_value, series, comment, source }
 //
-// SOURCE (fetched):
-//   github.com/packetpilot/bmw-f  ->  cheats/FDLCodes.xml   (GPL-3.0)
-//   Raw: https://raw.githubusercontent.com/packetpilot/bmw-f/master/cheats/FDLCodes.xml
+// SOURCE (fetched repo, pinned in sources.json):
+//   github.com/packetpilot/bmw-f  ->  cheats/*.xml   (GPL-3.0, see LICENSE.md in that repo)
+//   The repo aggregates the community "FDL cheat code" XML files used by E-Sys launchers. We ingest the
+//   WHOLE cheats/ directory (one XML per contributor), not just FDLCodes.xml. As of the pinned commit
+//   that is 21 files, 96 distinct CAFDs, ~5,300 function writes, spanning F-series AND G-series
+//   (G001/G005/G007/G011/G015/G020/G030, plus I001 and RR11). The mirror repo
+//   botho/TokenMaster-Launcher-FDL is byte-identical to this cheats/ folder but carries no license, so
+//   we source from packetpilot/bmw-f (GPL) only. TMD29/BMW-Cheat-Codes_F3X is already included here as
+//   cheats/TMD29.xml.
 //
-// The FDLCodes.xml file is an E-Sys "FDL coding cheat" catalog for BMW F-chassis.
-// Structure:
+// Each XML file shares one schema:
 //   <FDL>
-//     <cafd id="00000794" name="FEM_BODY" series="F020,F030">
+//     <cafd id="00000794" name="FEM_BODY" series="F020,F030" author="...">
 //       <code description="Human readable function / value">
 //         <group id="3062">
 //           <function start="68" end="68" mask="11111111b" comment="...">32</function>
 //           ...
-//         </group>
-//         ...
-//       </code>
-//       ...
-//     </cafd>
-//     ...
-//   </FDL>
+//   The cafd @author attribute is a person handle and is intentionally NOT ingested (no people data).
 //
 // Mapping to the target schema:
-//   chassis_family  -> "F"  (whole repo is F-series; chassis tokens uppercase per join convention)
-//   ecu_or_cafd     -> "<ECU_NAME>:<CAFD_ID>"  (e.g. "FEM_BODY:0x00000794")
-//   ecu             -> the cafd @name (ECU short name, e.g. FEM_BODY / IHKA / KOMBI / NBT)
-//   cafd            -> the cafd @id, 0x-prefixed (the canonical CAFD container id)
-//   fsw_label       -> the coding-group locus "<group>/<start>" (e.g. "3062/68") — the FDL analog
-//                      of an FSW (which byte, in which group, this function writes). The 'mask'
-//                      column carries the exact bit-field.
-//   value_label     -> symbolic value token when the write value is a named enum (e.g. "Aktiv",
-//                      "Soft_On", "TFL_S", "popup_and_config"); null when the value is a raw hex byte.
-//   value_hex       -> 0x-prefixed hex of the write value when it is a numeric byte (hex 0x-prefixed
-//                      per join convention); null when the value is a symbolic enum token.
-//   meaning         -> the parent <code @description> (the human-readable effect of the coding).
-//   source          -> provenance string incl. repo, file, license.
+//   chassis_family  -> derived from the cafd @series families: F / G / I / RR, comma-joined when a CAFD
+//                      spans more than one (e.g. "F,G"); null when no series is given. (Was hardcoded "F"
+//                      when only FDLCodes.xml was read; that is wrong now that the data spans G-series.)
+//   series          -> the raw cafd @series list (e.g. "F020,F030,G011"); per-chassis applicability.
+//   ecu_or_cafd     -> "<ECU_NAME>:<0xCAFD>" (e.g. "FEM_BODY:0x00000794")
+//   ecu             -> the cafd @name (ECU short name)
+//   cafd            -> the cafd @id, 0x-prefixed uppercase
+//   fsw_label       -> "<group>/<start>" locus (the FDL analog of an FSW: which byte, in which group)
+//   value_label     -> symbolic enum write token (e.g. Aktiv, TFL_S) or null
+//   value_hex       -> 0x-prefixed byte value when numeric, or null
+//   meaning         -> the parent <code @description> (the human-readable effect)
+//   comment         -> the <function @comment> when present (per-write note)
+//   source          -> provenance string (repo + license); per-contributor author file is NOT recorded
 //
-// One row is emitted per <function> write (the atomic coding write), so join granularity stays at
-// the byte/bit-write level used elsewhere in the DB. A single <code> with N function writes yields
-// N rows sharing the same `meaning`.
-//
-// Zero deps: a tiny tag-stream XML scanner (the file is a flat, attribute-driven dialect with no
-// CDATA/namespaces), not a generic XML parser.
+// One row per distinct coding write. Because contributors copy each other, the same write recurs across
+// files; rows are DE-DUPED on (cafd, group, byte_start, byte_end, mask, raw_value), keeping the variant
+// that carries a description. Zero deps: a tiny tag-stream scanner (flat attribute-driven XML).
 
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');                 // bmw-unified-db
-const OUT_DIR = join(ROOT, 'build', 'external');
+const ROOT = process.env.BMW_REPO_ROOT || resolve(__dirname, '..', '..');  // the repo collection root
+const OUT_DIR = join(__dirname, '..', 'build', 'external');
 const OUT_FILE = join(OUT_DIR, 'fdl_code.ndjson');
 
-// Local cache of the fetched raw file (populated by the harness before running, or pass --xml=PATH).
-const DEFAULT_XML = '/tmp/FDLCodes.xml';
-const SRC_URL = 'https://raw.githubusercontent.com/packetpilot/bmw-f/master/cheats/FDLCodes.xml';
+// All FDL cheat XML lives in packetpilot/bmw-f/cheats. Override with --dir=PATH.
+const CHEATS_DIR = argVal('dir') || join(ROOT, 'bmw-f', 'cheats');
 const SRC_REPO = 'github.com/packetpilot/bmw-f';
 const LICENSE = 'GPL-3.0';
 
@@ -71,220 +66,179 @@ function argVal(name) {
   return a ? a.slice(pfx.length) : null;
 }
 
-// ----------------------------------------------------------------------------
-// Minimal HTML/XML entity decode (this dialect only uses the basic five + numeric)
-// ----------------------------------------------------------------------------
 function decodeEntities(s) {
   if (s == null) return s;
   if (s.indexOf('&') === -1) return s;
   return s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&amp;/g, '&'); // last, so we don't double-decode
+    .replace(/&amp;/g, '&');
 }
 
-// Parse the attributes of a start tag body (already stripped of the tag name).
 function parseAttrs(body) {
   const attrs = {};
-  for (const m of body.matchAll(/([A-Za-z_][\w.:-]*)\s*=\s*"([^"]*)"/g)) {
-    attrs[m[1]] = decodeEntities(m[2]);
-  }
+  for (const m of body.matchAll(/([A-Za-z_][\w.:-]*)\s*=\s*"([^"]*)"/g)) attrs[m[1]] = decodeEntities(m[2]);
   return attrs;
 }
 
-// ----------------------------------------------------------------------------
-// Tag-stream tokenizer.
-// Strips XML comments first (the file ships a commented-out <!-- Sample Only ... -->
-// block that MUST be excluded). Then walks tags, tracking cafd/code/group context
-// and emitting one record per <function> element with its text content as the value.
-// ----------------------------------------------------------------------------
 function* tokens(xml) {
-  // remove comments (no nested comments in XML)
-  xml = xml.replace(/<!--[\s\S]*?-->/g, '');
+  xml = xml.replace(/<!--[\s\S]*?-->/g, '');                 // drop comments (incl. <!-- Sample Only -->)
   const tagRe = /<(\/?)([A-Za-z][\w.:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
   let last = 0;
   for (const m of xml.matchAll(tagRe)) {
     const text = xml.slice(last, m.index);
     if (text.trim() !== '') yield { type: 'text', value: text };
     last = m.index + m[0].length;
-    const closing = m[1] === '/';
     const name = m[2];
-    const selfClose = m[4] === '/';
-    if (closing) {
-      yield { type: 'close', name };
-    } else {
-      yield { type: 'open', name, attrs: parseAttrs(m[3]), selfClose };
-      if (selfClose) yield { type: 'close', name };
-    }
+    if (m[1] === '/') { yield { type: 'close', name }; }
+    else { yield { type: 'open', name, attrs: parseAttrs(m[3]), selfClose: m[4] === '/' }; if (m[4] === '/') yield { type: 'close', name }; }
   }
 }
 
-// Is the value text a pure hex byte literal (E-Sys cheats use bare hex like "01","32","FF","0B")?
 const HEX_RE = /^[0-9A-Fa-f]{1,2}$/;
 function valueParts(raw) {
   const v = (raw == null ? '' : String(raw)).trim();
   if (v === '') return { value_label: null, value_hex: null };
-  if (HEX_RE.test(v)) {
-    const n = parseInt(v, 16);
-    return { value_label: null, value_hex: '0x' + n.toString(16).toUpperCase().padStart(2, '0') };
-  }
-  // symbolic enum token (e.g. Aktiv, Soft_On, TFL_S, popup_and_config, perm_on)
+  if (HEX_RE.test(v)) return { value_label: null, value_hex: '0x' + parseInt(v, 16).toString(16).toUpperCase().padStart(2, '0') };
   return { value_label: v, value_hex: null };
 }
 
 function cafdId(id) {
   if (!id) return null;
-  const clean = String(id).trim().replace(/^0x/i, '');
-  return '0x' + clean.toUpperCase();
+  return '0x' + String(id).trim().replace(/^0x/i, '').toUpperCase();
 }
 
-// ----------------------------------------------------------------------------
-// Main
-// ----------------------------------------------------------------------------
-function main() {
-  mkdirSync(OUT_DIR, { recursive: true });
-  const xmlPath = argVal('xml') || DEFAULT_XML;
-
-  let xml;
-  try {
-    xml = readFileSync(xmlPath, 'utf8');
-  } catch (e) {
-    log('FATAL: could not read FDLCodes.xml at ' + xmlPath + ' : ' + e.message);
-    log('The parser needs the raw file fetched from ' + SRC_URL);
-    process.exit(2);
+// Distinct vehicle families from a series list: F / G / I / U / RR, comma-joined, sorted; null if none.
+function familyOf(series) {
+  if (!series) return null;
+  const fams = new Set();
+  for (const tok of String(series).split(',')) {
+    const m = tok.trim().toUpperCase().match(/^(RR|[FGIU])/);
+    if (m) fams.add(m[1]);
   }
-  // strip UTF-8 BOM if present
+  return fams.size ? [...fams].sort().join(',') : null;
+}
+
+// Parse one cheat XML file into an array of function-write records.
+function parseFile(xml) {
   if (xml.charCodeAt(0) === 0xFEFF) xml = xml.slice(1);
+  const recs = [];
+  let cafd = null, code = null, group = null, curFn = null;
 
-  const out = createWriteStream(OUT_FILE);
-
-  const source = `${SRC_REPO}/cheats/FDLCodes.xml (${LICENSE})`;
-
-  // context
-  let cafd = null;     // { id, name, series }
-  let code = null;     // { description }
-  let group = null;    // { id }
-  let curFn = null;    // { attrs, text }
-
-  let rows = 0;
-  const ecuSet = new Set();
-  const cafdSet = new Set();
-  const labelSet = new Set();       // distinct fsw_label (group/start loci)
-  const meaningSet = new Set();     // distinct code descriptions
-  const seriesSet = new Set();
-  const valLabelSet = new Set();
-  let symbolicVals = 0, hexVals = 0, emptyVals = 0;
-  const caveats = [];
-
-  function emitFunction() {
+  function emit() {
     if (!curFn) return;
     const a = curFn.attrs || {};
     const rawValue = decodeEntities((curFn.text || '').trim());
     const { value_label, value_hex } = valueParts(rawValue);
-    if (value_label) { symbolicVals++; valLabelSet.add(value_label); }
-    else if (value_hex) hexVals++;
-    else emptyVals++;
-
     const ecu = cafd ? cafd.name : null;
     const cafdHex = cafd ? cafdId(cafd.id) : null;
-    const ecu_or_cafd = (ecu || cafdHex) ? `${ecu || '?'}:${cafdHex || '?'}` : null;
     const groupId = group ? group.id : null;
     const start = a.start != null ? a.start : null;
-    const end = a.end != null ? a.end : null;
-    // fsw_label: the FDL locus = coding group + start byte (the "which function" address)
-    const fsw_label = (groupId != null && start != null)
-      ? `${groupId}/${start}`
-      : (groupId != null ? `${groupId}` : null);
-    const meaning = code ? code.description : null;
-
-    if (ecu) ecuSet.add(ecu);
-    if (cafdHex) cafdSet.add(cafdHex);
-    if (fsw_label) labelSet.add(fsw_label);
-    if (meaning) meaningSet.add(meaning);
-
-    const rec = {
-      chassis_family: 'F',                  // F-series; uppercase per join convention
-      ecu_or_cafd,                          // "<ECU>:<0xCAFD>"
-      ecu,                                  // ECU short name (FEM_BODY, IHKA, ...)
-      cafd: cafdHex,                        // 0x-prefixed CAFD id
-      fsw_label,                            // "<group>/<start>" locus
-      value_label,                          // symbolic enum value or null
-      value_hex,                            // 0x-prefixed byte value or null
-      meaning,                              // human-readable function (code @description)
-      group: groupId,                       // coding group id
+    const fsw_label = (groupId != null && start != null) ? `${groupId}/${start}` : (groupId != null ? `${groupId}` : null);
+    const series = cafd && cafd.series ? cafd.series : null;
+    recs.push({
+      chassis_family: familyOf(series),
+      ecu_or_cafd: (ecu || cafdHex) ? `${ecu || '?'}:${cafdHex || '?'}` : null,
+      ecu,
+      cafd: cafdHex,
+      fsw_label,
+      value_label,
+      value_hex,
+      meaning: code ? code.description : null,
+      group: groupId,
       byte_start: start != null ? Number(start) : null,
-      byte_end: end != null ? Number(end) : null,
-      mask: a.mask != null ? a.mask : null, // bit mask, e.g. "00000010b"
-      raw_value: rawValue || null,          // original write token as written in the cheat
-      series: cafd && cafd.series ? cafd.series : null, // explicit F-series list when given
+      byte_end: a.end != null ? Number(a.end) : null,
+      mask: a.mask != null ? a.mask : null,
+      raw_value: rawValue || null,
+      series,
       comment: a.comment != null ? a.comment : null,
-      source,
-    };
-    out.write(JSON.stringify(rec) + '\n');
-    rows++;
+    });
     curFn = null;
   }
 
   for (const t of tokens(xml)) {
     if (t.type === 'open') {
       const n = t.name.toLowerCase();
-      if (n === 'cafd') {
-        cafd = {
-          id: t.attrs.id || null,
-          name: (t.attrs.name || '').trim() || null,
-          series: (t.attrs.series || '').trim() || null,
-        };
-        if (cafd.series) cafd.series.split(',').forEach(s => { const v = s.trim().toUpperCase(); if (v) seriesSet.add(v); });
-      } else if (n === 'code') {
-        code = { description: (t.attrs.description != null ? t.attrs.description : '').trim() || null };
-      } else if (n === 'group') {
-        group = { id: t.attrs.id != null ? String(t.attrs.id).trim() : null };
-      } else if (n === 'function') {
-        emitFunction(); // flush any unterminated previous fn (defensive)
-        curFn = { attrs: t.attrs, text: '' };
-        if (t.selfClose) emitFunction();
-      }
-    } else if (t.type === 'text') {
-      if (curFn) curFn.text += t.value;
-    } else if (t.type === 'close') {
+      if (n === 'cafd') cafd = { id: t.attrs.id || null, name: (t.attrs.name || '').trim() || null, series: (t.attrs.series || '').trim() || null };
+      else if (n === 'code') code = { description: (t.attrs.description != null ? t.attrs.description : '').trim() || null };
+      else if (n === 'group') group = { id: t.attrs.id != null ? String(t.attrs.id).trim() : null };
+      else if (n === 'function') { emit(); curFn = { attrs: t.attrs, text: '' }; if (t.selfClose) emit(); }
+    } else if (t.type === 'text') { if (curFn) curFn.text += t.value; }
+    else if (t.type === 'close') {
       const n = t.name.toLowerCase();
-      if (n === 'function') emitFunction();
+      if (n === 'function') emit();
       else if (n === 'group') group = null;
       else if (n === 'code') code = null;
       else if (n === 'cafd') cafd = null;
     }
   }
-  emitFunction(); // flush trailing
+  emit();
+  return recs;
+}
 
+function listXml(dir) {
+  let names;
+  try { names = readdirSync(dir); } catch { return []; }
+  return names.filter(n => extname(n).toLowerCase() === '.xml')
+    .map(n => join(dir, n))
+    .filter(p => { try { return statSync(p).isFile(); } catch { return false; } })
+    .sort();   // stable order -> deterministic de-dup winner
+}
+
+function main() {
+  mkdirSync(OUT_DIR, { recursive: true });
+  const files = listXml(CHEATS_DIR);
+  const source = `${SRC_REPO}/cheats/*.xml (${LICENSE})`;
+  const caveats = [];
+
+  if (files.length === 0) {
+    createWriteStream(OUT_FILE).end();
+    log('No FDL cheat XML found in ' + CHEATS_DIR);
+    log('Fetch packetpilot/bmw-f (sources.json) or pass --dir=PATH to its cheats/ folder.');
+    log('REPORT ' + JSON.stringify({ files: 0, cafds: 0, rows: 0, dir: CHEATS_DIR }));
+    return;
+  }
+
+  // De-dup on the coding write; keep the variant that carries a description.
+  const byKey = new Map();
+  let rawCount = 0, badFiles = 0;
+  for (const f of files) {
+    let recs;
+    try { recs = parseFile(readFileSync(f, 'utf8')); } catch { badFiles++; continue; }
+    for (const r of recs) {
+      rawCount++;
+      const key = [r.cafd, r.group, r.byte_start, r.byte_end, r.mask, r.raw_value].join('|');
+      const prev = byKey.get(key);
+      if (!prev) byKey.set(key, r);
+      else if ((!prev.meaning || prev.meaning === '') && r.meaning) byKey.set(key, r);   // prefer described
+    }
+  }
+
+  const out = createWriteStream(OUT_FILE);
+  const ecuSet = new Set(), cafdSet = new Set(), famSet = new Set(), seriesSet = new Set();
+  let rows = 0;
+  for (const r of byKey.values()) {
+    if (r.ecu) ecuSet.add(r.ecu);
+    if (r.cafd) cafdSet.add(r.cafd);
+    if (r.chassis_family) r.chassis_family.split(',').forEach(x => famSet.add(x));
+    if (r.series) r.series.split(',').forEach(x => seriesSet.add(x.trim().toUpperCase()));
+    out.write(JSON.stringify({ ...r, source }) + '\n');
+    rows++;
+  }
   out.end();
 
   out.on('finish', () => {
-    if (rows === 0) caveats.push('No <function> rows parsed — file structure may have changed upstream.');
-    caveats.push('All rows are F-series E-Sys FDL coding cheats from a single community catalog (FDLCodes.xml); they are FETCHED, not reconstructed.');
-    caveats.push('chassis_family is the literal family "F"; per-row exact F-chassis (e.g. F020/F030) is only known when the cafd carries a series= attribute (captured in the `series` column), otherwise null.');
-    caveats.push('fsw_label is the FDL locus "<group>/<start_byte>", the structural analog of an FSW; this catalog has no numeric SFA/FSW codes, so labels are group/byte addresses, not NCS FSW tokens.');
-    caveats.push('value_label holds symbolic enum write tokens (e.g. Aktiv, Soft_On, TFL_S); value_hex holds raw byte writes as 0x.. ; exactly one of the two is set per non-empty row.');
-    caveats.push('The commented-out <!-- Sample Only --> CAFD block in the source is intentionally excluded.');
-
-    const report = {
-      rows,
-      distinct_ecus: ecuSet.size,
-      distinct_cafds: cafdSet.size,
-      distinct_fsw_labels: labelSet.size,
-      distinct_meanings: meaningSet.size,
-      distinct_value_labels: valLabelSet.size,
-      hex_value_rows: hexVals,
-      symbolic_value_rows: symbolicVals,
-      empty_value_rows: emptyVals,
-      series_seen: [...seriesSet].sort(),
-      ecus: [...ecuSet].sort(),
-      cafds: [...cafdSet].sort(),
-    };
-    log('REPORT ' + JSON.stringify(report));
+    if (badFiles) caveats.push(badFiles + ' XML file(s) failed to parse and were skipped.');
+    caveats.push('All rows are community E-Sys FDL coding cheats from packetpilot/bmw-f cheats/*.xml (GPL-3.0); FETCHED, not reconstructed. Underlying byte/mask/value data derives from BMW PSdZData CAFD definitions.');
+    caveats.push('chassis_family is derived from the cafd series (F/G/I/RR); null when a CAFD gives no series. series holds the raw per-chassis list.');
+    caveats.push('De-duped on (cafd, group, byte_start, byte_end, mask, raw_value); contributors copy each other so the raw count is much higher than the kept rows.');
+    caveats.push('The cafd @author handle is intentionally not ingested (no people data).');
+    log('REPORT ' + JSON.stringify({
+      files: files.length, bad_files: badFiles, raw_functions: rawCount, rows,
+      distinct_ecus: ecuSet.size, distinct_cafds: cafdSet.size,
+      families: [...famSet].sort(), series_count: seriesSet.size,
+    }));
     log('CAVEATS ' + JSON.stringify(caveats));
     log('OUT ' + OUT_FILE);
   });
