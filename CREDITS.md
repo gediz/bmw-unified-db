@@ -20,17 +20,17 @@ removed.
 
 ## Where each layer comes from
 
-Each layer is extracted from one source in this collection and reconciles to it.
+Each layer is extracted from one source pinned in [`sources.json`](sources.json) and reconciles to it.
 
 | Layer | Source | Detail |
 |---|---|---|
 | Diagnostics: jobs, results, tables, fault dictionaries | [`ediabasx-docs-sgbd`](https://github.com/emdzej/ediabasx-docs-sgbd) | 2,466 decoded SGBD pages |
-| Routing, English text, coding catalog, identification, flash, measurements | [`bmw-advanced-tools`](https://git.0x45.cz/em/bmw-advanced-tools) | the `T_GRTB.PRG` phone book, the `EnglishEcu` binaries, the SP-DATEN and CVT coding data, the WinKFP database, the INPA scripts |
+| Routing, English text, coding catalog, identification, flash, measurements | [`bmw-advanced-tools`](https://git.0x45.cz/em/bmw-advanced-tools) | the `T_GRTB.PRG` phone book and `G_*.grp` group files, the `EnglishEcu` binaries, the SP-DATEN and CVT coding data, the WinKFP database, the INPA scripts |
 | Coding examples and raw coding images | [`BMW_coding`](https://github.com/dzid26/BMW_coding), [`diesel-x5m`](https://github.com/yarik-vv/diesel-x5m) | one E82 and one E70 diesel |
 | Legacy DS2 jobs and faults | [`j2534`](https://github.com/emdzej/j2534) | the M54 MS43 module |
 | Live CAN messages, signals, values, checksums | [`opendbc`](https://github.com/BMW-E8x-E9x/opendbc), [`openpilot`](https://github.com/BMW-E8x-E9x/openpilot) | E8x/E9x |
 
-## Source repositories in this collection
+## Source repositories
 
 Attribution and license for each source. For what each one feeds, see
 [Where each layer comes from](#where-each-layer-comes-from).

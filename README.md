@@ -1,6 +1,6 @@
 ![BMW Unified Database. 2,466 BMW ECUs in one SQLite database, every layer joined on a single key.](banner.png)
 
-One SQLite database that aggregates every usable piece of BMW ECU data from this repo collection into
+One SQLite database that aggregates every usable piece of BMW ECU data from a set of pinned open-source repositories into
 one place, joined by a single ECU key.
 
 ## Safety
@@ -119,7 +119,7 @@ grep bmw.sqlite.gz SHA256SUMS | sha256sum -c    # verify the download
 gunzip bmw.sqlite.gz                            # -> bmw.sqlite (655 MB)
 ```
 
-To build it yourself instead, deterministic and byte-identical, see [BUILD.md](docs/BUILD.md).
+To build it yourself instead (byte-identical to the release with Node v22.20.0), see [BUILD.md](docs/BUILD.md).
 
 ## Documentation
 

@@ -28,7 +28,7 @@ import { createReadStream, createWriteStream, mkdirSync, readdirSync, statSync, 
 import { createInterface } from "node:readline";
 import path from "node:path";
 
-const REPO_ROOT = process.env.BMW_REPO_ROOT || path.resolve(import.meta.dirname, "..", "..");
+const REPO_ROOT = process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(import.meta.dirname, "..", "..");
 const OUT_ROOT = path.resolve(import.meta.dirname, "..", "build");
 
 const BMWCAN_PY = path.join(REPO_ROOT, "openpilot/selfdrive/car/bmw/bmwcan.py");
@@ -269,7 +269,7 @@ async function buildNetto() {
           ecu_module: module,
           sgbd,
           state,
-          source_file: file,
+          source_file: path.relative(REPO_ROOT, file).split(path.sep).join('/'),
         };
         try {
           const r = await parseNettoFile(file, meta, w);
@@ -295,7 +295,7 @@ async function buildNetto() {
       ecu_module: parent,
       sgbd: "unknown",
       state: "coded", // a live working capture (current vehicle coding), treat as coded image
-      source_file: file,
+      source_file: path.relative(REPO_ROOT, file).split(path.sep).join('/'),
     };
     try {
       const r = await parseNettoFile(file, meta, w);

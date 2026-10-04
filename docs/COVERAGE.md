@@ -24,6 +24,6 @@ The values are accurate. The coverage is uneven, and the honest numbers are in t
 - CAN and DS2. `can_*` covers the E8x/E9x chassis group. `ds2_*` covers the single MS43 engine module.
 - Bus assignment. Message-level buses are high confidence. Per-ECU buses in `ecu_bus` are a heuristic
   from the ECU group name; the `confidence` column says which is which.
-- Newer ECUs. About 728 G-series variants are decoded but have no local binary, so they could not be
+- Newer ECUs. 661 decoded ECUs, the G-series among them, have no local binary, so they could not be
   cross-checked against BMW's originals (see [VERIFICATION.md](VERIFICATION.md)).
 - Wiring and repair text. Not present. The WDS and TIS source data is not in these repos.

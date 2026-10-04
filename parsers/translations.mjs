@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, '..');
-const TOOLS = resolve(REPO, '..', 'bmw-advanced-tools', 'app');
+const TOOLS = resolve(process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(REPO, '..'), 'bmw-advanced-tools', 'app');
 
 const SOURCES = [
   { key: 'bmw', label: 'BMWCodingTool', path: resolve(TOOLS, 'EC-APPS/BMWCodingTool/Translations.csv') },

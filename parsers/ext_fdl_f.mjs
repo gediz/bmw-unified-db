@@ -49,7 +49,7 @@ import { join, dirname, basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.BMW_REPO_ROOT || resolve(__dirname, '..', '..');  // the repo collection root
+const ROOT = process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(__dirname, '..', '..');  // the repo collection root
 const OUT_DIR = join(__dirname, '..', 'build', 'external');
 const OUT_FILE = join(OUT_DIR, 'fdl_code.ndjson');
 
@@ -197,7 +197,7 @@ function main() {
     log('No FDL cheat XML found in ' + CHEATS_DIR);
     log('Fetch packetpilot/bmw-f (sources.json) or pass --dir=PATH to its cheats/ folder.');
     log('REPORT ' + JSON.stringify({ files: 0, cafds: 0, rows: 0, dir: CHEATS_DIR }));
-    return;
+    process.exit(1);   // fail loudly: an empty fdl_code layer must never be built silently
   }
 
   // De-dup on the coding write; keep the variant that carries a description.

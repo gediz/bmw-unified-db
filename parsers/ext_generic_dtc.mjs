@@ -6,7 +6,7 @@
 // lacks. Joins to our world via the same 5-char DTC token (e.g. P0301) that appears
 // in scan-tool output and in many BMW UDS "read DTC" responses for the OBD subset.
 //
-// PRIMARY SOURCE (fetched if reachable):
+// INPUT: the committed snapshot external/generic-dtc/obd-trouble-codes.csv (retrieved 2026-06-24) of
 //   github.com/mytrile/obd-trouble-codes  (MIT, (c) 2014 Dimitar Kostov)
 //   raw CSV: .../master/obd-trouble-codes.csv  -> "CODE","Description" (RFC-4180)
 //   We prefer the CSV over the JSON: the upstream JSON reuses the first row's
@@ -14,7 +14,8 @@
 //   keys are noise — only the *values* carry the real code+desc. The CSV is the
 //   unambiguous canonical form (col0 = code, col1 = description).
 //
-// FALLBACK (if the URL is unreachable in this environment):
+// FALLBACKS, only if that file is missing (not reproducible): fetch the upstream master CSV, then
+// JSON; if both are unreachable:
 //   Reconstruct the well-known *standardized* SAE J2012 generic ranges we are
 //   confident about (P0xxx core powertrain block, etc.) and mark those rows with
 //   source="reconstructed:ISO15031/SAEJ2012". We NEVER fabricate BMW-specific or
@@ -50,10 +51,9 @@ const SRC_JSON =
 const SOURCE_TAG_FETCHED = "mytrile/obd-trouble-codes@master (MIT)";
 const SOURCE_TAG_RECON = "reconstructed:ISO15031/SAEJ2012";
 
-// Optional: a pre-downloaded local copy (e.g. fetched by the orchestrator).
-// If present we use it instead of the network so the run is reproducible.
+// The committed snapshot under external/generic-dtc/ is the input, so the run is reproducible offline.
+// The network endpoints above are only a fallback if that file is missing.
 const LOCAL_CSV_CANDIDATES = [
-  "/tmp/obd-trouble-codes.csv",
   path.join(
     path.resolve(import.meta.dirname, "..", "external", "generic-dtc"),
     "obd-trouble-codes.csv",

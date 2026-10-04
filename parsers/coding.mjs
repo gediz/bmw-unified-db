@@ -22,11 +22,11 @@
 import { createReadStream, createWriteStream, existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, resolve, relative, sep } from 'node:path';
 
 // repo root resolved relative to this file (parsers/ -> bmw-unified-db/ -> repo root), so no build-host path is baked in
-const ROOT = process.env.BMW_REPO_ROOT || join(import.meta.dirname, '..', '..');
-const OUT_DIR = join(ROOT, 'bmw-unified-db', 'build', 'coding');
+const ROOT = process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : join(import.meta.dirname, '..', '..');
+const OUT_DIR = join(import.meta.dirname, '..', 'build', 'coding');
 const TRANSLATIONS = join(ROOT, 'bmw-advanced-tools/app/NCSEXPER/NCS_Dummy/Translations.csv');
 const FSW_PSW_DAT = join(ROOT, 'bmw-advanced-tools/app/NCSEXPER/BIN/fsw_psw.dat');
 const BMW_CODING_DIR = join(ROOT, 'BMW_coding');
@@ -152,7 +152,7 @@ const META_KEYS = new Set([
 // ----------------------------------------------------------------------------
 function walk(dir, acc = []) {
   let ents;
-  try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
+  try { ents = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); } catch { return acc; }
   for (const e of ents) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walk(p, acc);
@@ -203,11 +203,11 @@ async function main() {
   let exampleRows = 0;
   let ncsDummyPairs = 0;
 
-  // Catalog accumulator: key = `${sgbd} ${fsw}` -> { sgbd, ecu, fsw, psw:Set, chassis:Set, sources:Set }
+  // Catalog accumulator: key = `${sgbd}\u0000${fsw}` -> { sgbd, ecu, fsw, psw:Set, chassis:Set, sources:Set }
   const catalog = new Map();
   function addLabel(sgbd, ecu, fsw, psw, chassis, source) {
     if (META_KEYS.has(fsw)) return; // keep catalog to codeable functions
-    const k = sgbd + ' ' + fsw;
+    const k = sgbd + '\u0000' + fsw;
     let rec = catalog.get(k);
     if (!rec) { rec = { sgbd, ecu, fsw, psw: new Set(), chassis: new Set(), sources: new Set() }; catalog.set(k, rec); }
     if (psw) rec.psw.add(psw);
@@ -250,7 +250,7 @@ async function main() {
           fsw_meaning: tr.get(fsw.toLowerCase()) || null,
           psw_meaning: psw ? (tr.get(psw.toLowerCase()) || null) : null,
           is_meta: META_KEYS.has(fsw) ? 1 : 0,
-          file: f,
+          file: relative(ROOT, f).split(sep).join('/'),
         };
         exampleOut.write(JSON.stringify(rec) + '\n');
         exampleRows++;

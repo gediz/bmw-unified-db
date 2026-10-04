@@ -20,7 +20,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..", ".."); // .../bmw
+const REPO_ROOT = process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(__dirname, "..", ".."); // .../bmw
 const OUT_DIR = resolve(__dirname, "..", "build", "can"); // bmw-unified-db/build/can
 
 const DBC_PATH = resolve(REPO_ROOT, "opendbc/opendbc/dbc/bmw_e9x_e8x.dbc");

@@ -41,12 +41,12 @@
 // ZERO-DEP, Node v22 ESM. Streams output. Partial coverage is reported honestly.
 
 import { readFileSync, createWriteStream, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { dirname, join, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, '..');
-const DATEN = join(process.env.BMW_REPO_ROOT || join(REPO, '..'), 'bmw-advanced-tools/app/NCSEXPER/DATEN');
+const DATEN = join(process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : join(REPO, '..'), 'bmw-advanced-tools/app/NCSEXPER/DATEN');
 const OUT_DIR = join(REPO, 'build', 'coding');
 const OUT_FILE = join(OUT_DIR, 'coding_variant.ndjson');
 
@@ -104,7 +104,7 @@ function loadSwtTable(path) {
 // Find the SWT name tables that live in a chassis directory (suffix index varies per chassis).
 function findSwt(dir, kind /* 'FSW' | 'PSW' | 'ASW' */) {
   let entries;
-  try { entries = readdirSync(dir); } catch { return null; }
+  try { entries = readdirSync(dir).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)); } catch { return null; }
   const re = new RegExp('^SWT' + kind + '\\d+\\.dat$', 'i');
   const hit = entries.find(f => re.test(f));
   return hit ? join(dir, hit) : null;
@@ -235,14 +235,14 @@ function resyncForward(buf, from) {
 function findCvtFiles() {
   const found = [];
   let top;
-  try { top = readdirSync(DATEN); } catch (e) { warn('cannot read DATEN: ' + e.message); return found; }
+  try { top = readdirSync(DATEN).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)); } catch (e) { warn('cannot read DATEN: ' + e.message); return found; }
   for (const name of top) {
     const full = join(DATEN, name);
     let st;
     try { st = statSync(full); } catch { continue; }
     if (st.isDirectory()) {
       let sub;
-      try { sub = readdirSync(full); } catch { continue; }
+      try { sub = readdirSync(full).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)); } catch { continue; }
       for (const f of sub) {
         if (/CVT\.000$/i.test(f)) found.push({ path: join(full, f), dir: full, file: f });
       }
@@ -256,7 +256,7 @@ function findCvtFiles() {
     const prev = byName.get(c.file.toUpperCase());
     if (!prev || (ownDir && !prev.ownDir)) byName.set(c.file.toUpperCase(), { ...c, chassis, ownDir });
   }
-  return [...byName.values()].sort((a, b) => a.chassis.localeCompare(b.chassis));
+  return [...byName.values()].sort((a, b) => (a.chassis < b.chassis ? -1 : a.chassis > b.chassis ? 1 : 0));
 }
 
 // ---- main ----

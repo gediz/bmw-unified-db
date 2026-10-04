@@ -51,7 +51,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, '..', '..');               // the BMW collection root (two levels up from parsers/)
+const REPO = (process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(__dirname, '..', '..'));               // the BMW collection root (two levels up from parsers/)
 const TOOLS = path.join(REPO, 'bmw-advanced-tools', 'app');
 const ECU_DIRS = [
   path.join(TOOLS, 'EDIABAS', 'ECU'),
@@ -252,7 +252,7 @@ function collectGroupFiles(caveats) {
   for (const dir of ECU_DIRS) {
     if (!existsSync(dir)) continue;
     let names;
-    try { names = readdirSync(dir); } catch { continue; }
+    try { names = readdirSync(dir).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)); } catch { continue; }
     for (const name of names) {
       if (!/^G_.*\.grp$/i.test(name)) continue;
       const full = path.join(dir, name);
@@ -294,7 +294,7 @@ function parseSget(caveats) {
   const targets = [];
   const walk = (dir, chassisHint) => {
     let ents;
-    try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { ents = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); } catch { return; }
     for (const e of ents) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {

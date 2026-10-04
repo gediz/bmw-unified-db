@@ -71,7 +71,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, '..', '..');               // the BMW collection root (two levels up from parsers/)
+const REPO = (process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(__dirname, '..', '..'));               // the BMW collection root (two levels up from parsers/)
 const TOOLS = path.join(REPO, 'bmw-advanced-tools', 'app');
 const DATEN_DIR = path.join(TOOLS, 'NCSEXPER', 'DATEN');
 const BMW_CODING = path.join(REPO, 'BMW_coding');

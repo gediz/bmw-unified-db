@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, '..', '..');               // the BMW collection root (two levels up from parsers/)
+const REPO = (process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(__dirname, '..', '..'));               // the BMW collection root (two levels up from parsers/)
 const SRC_DIR = path.join(REPO, 'ediabasx-docs-sgbd', 'docs', 'sgbd');
 const OUT_DIR = path.resolve(__dirname, '..', 'build', 'sgbd'); // bmw-unified-db/build/sgbd
 

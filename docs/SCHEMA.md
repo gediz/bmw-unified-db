@@ -120,8 +120,9 @@ The `EnglishEcu` binaries are only partially translated, so these are tagged by 
 
 ## External layers
 
-These are fetched from openly licensed sources and kept under their own licenses in `external/`. See
-[CREDITS.md](../CREDITS.md).
+These come from openly licensed sources and keep their own licenses: committed snapshots in `external/`
+(OBDb, generic DTC), the pinned `bmw-f` repo (FDL), and tables embedded in their parsers (VIN, standard
+DIDs). See [CREDITS.md](../CREDITS.md).
 
 - `obd_signal` (`ecu_header`, `did_or_pid`): [OBDb](https://github.com/OBDb) live-data signals with
   scaling. `name`, `unit`, `scale`, `offset`, `bit_offset`, `bit_length`, `signed`, `values` (JSON

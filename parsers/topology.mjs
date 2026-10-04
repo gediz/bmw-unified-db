@@ -20,12 +20,12 @@ import { resolve } from 'node:path';
 // child_process call pattern that a repo security hook flags.
 const rx = (re, s) => re.exec(s);
 
-const ROOT = process.env.BMW_REPO_ROOT || resolve(import.meta.dirname, '..', '..');
-const OUT_DIR = resolve(ROOT, 'bmw-unified-db/build/topology');
+const ROOT = process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(import.meta.dirname, '..', '..');
+const OUT_DIR = resolve(import.meta.dirname, '..', 'build', 'topology');
 const OUT = resolve(OUT_DIR, 'ecu_bus.ndjson');
 
 const P = {
-  routing: resolve(ROOT, 'bmw-unified-db/build/routing/routing.ndjson'),
+  routing: resolve(import.meta.dirname, '..', 'build', 'routing', 'routing.ndjson'),   // this repo's build/, not the source root
   dbc:     resolve(ROOT, 'opendbc/opendbc/dbc/bmw_e9x_e8x.dbc'),
   dbcReadme: resolve(ROOT, 'opendbc/README.md'),
   values:  resolve(ROOT, 'openpilot/selfdrive/car/bmw/values.py'),
@@ -208,7 +208,7 @@ function probeSpDaten(dir) {
   try {
     const walk = (d, depth) => {
       if (depth > 2) return;
-      for (const e of readdirSync(d)) {
+      for (const e of readdirSync(d).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
         const p = resolve(d, e);
         let st; try { st = statSync(p); } catch { continue; }
         if (st.isDirectory()) walk(p, depth + 1); else files++;
@@ -275,6 +275,7 @@ function main() {
 
   // ---- scope = sgbd + ecu_group (from routing) ----
   const routingTxt = readSafe(P.routing);
+  if (!routingTxt) { console.error('topology: missing ' + P.routing + ' (run parsers/routing.mjs first)'); process.exit(1); }
   const groupBusCache = new Map();
   let routingRows = 0, badRouting = 0;
   const seenSgbd = new Map();

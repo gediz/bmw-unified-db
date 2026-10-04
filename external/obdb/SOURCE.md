@@ -3,9 +3,12 @@
 - **Upstream:** https://github.com/OBDb  (per-model repos `OBDb/BMW-*`)
 - **Files used:** `signalsets/v3/default.json` in each `OBDb/BMW*` repo, fetched raw from
   `https://raw.githubusercontent.com/OBDb/<repo>/main/signalsets/v3/default.json`
-- **License:** CC-BY-SA-4.0 (Creative Commons Attributionâ€“ShareAlike 4.0 International).
+- **License:** CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0 International).
   Attribution to the OBDb project is required; derived data must remain share-alike.
 - **Retrieved:** 2026-06-24
+- **Build input:** the committed snapshot `external/obdb/obd_signal.ndjson` (663 signals). The build copies
+  it and does not touch the network. `node parsers/ext_obdb.mjs --refresh` re-fetches from the unpinned
+  upstream `main` branches and rewrites the snapshot, which changes the database; commit that diff deliberately.
 - **Parser:** `parsers/ext_obdb.mjs` (zero-dep Node ESM)
 - **Output:** `build/external/obd_signal.ndjson`
 
@@ -16,7 +19,7 @@ layers describe *which* result a job returns but not the openly-publishable rawâ
 decode. OBDb signal definitions carry exactly that: bit offset/length, divisor/multiplier,
 additive offset, sign, unit, and value-enum maps for status signals.
 
-## What was fetched
+## How the snapshot was fetched
 
 The org-level repo listing (`GET /orgs/OBDb/repos`) is unioned with a built-in fallback
 list of 38 known `BMW*` repos. Each repo's `signalsets/v3/default.json` is fetched and

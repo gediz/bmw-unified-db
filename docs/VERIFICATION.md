@@ -8,7 +8,7 @@ not by sampling. The coverage gaps this verification does not close are in [COVE
   per-table dimensions match across all 2,466 files with zero mismatches. Of 326,161 fault rows, all but
   two matched on the first pass; the two were a parser bug (a capital `0X` hex prefix) and are fixed.
 - Markdown against BMW binaries: on a full census of 1,805 ECUs that have a local binary, the decode is
-  faithful. Zero fabricated codes, zero omissions on the same-version cohort. The 728 G-series ECUs with
-  no local binary are unverifiable this way.
+  faithful. Zero fabricated codes, zero omissions on the same-version cohort. The other 661 decoded ECUs,
+  the G-series among them, have no local binary and are unverifiable this way.
 - CAN, coding, routing, DS2: zero mismatches against the DBC, the TRC files, `T_GRTB.PRG`, and the MS43
   sources.

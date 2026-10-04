@@ -24,11 +24,11 @@ ISO 15031 / SAE J2012 standard P/C/B/U dictionary.
 ## Retrieval
 
 - Retrieved: 2026-06-24.
-- A copy of the source CSV is preserved in this folder (`obd-trouble-codes.csv`)
-  so the build is reproducible without network access. The parser also accepts a
-  pre-downloaded copy at `/tmp/obd-trouble-codes.csv`, and falls back to a live
-  fetch, then to a small reconstructed standard-P0 block if everything is
-  unreachable (those rows are tagged `reconstructed:ISO15031/SAEJ2012`).
+- The build reads only the copy committed in this folder (`obd-trouble-codes.csv`),
+  so it is reproducible without network access. If that file is missing, the parser
+  falls back to a live fetch of the unpinned upstream `master` CSV, then JSON, then to
+  a small reconstructed standard-P0 block (tagged `reconstructed:ISO15031/SAEJ2012`).
+  Either fallback changes the database, so keep the file committed.
 
 ## Build
 
@@ -44,7 +44,7 @@ ISO 15031 / SAE J2012 standard P/C/B/U dictionary.
 ## Caveats
 
 - This 2014 community compilation is most complete for **P** codes
-  (`P0100`–`P1918`). Its **C/B/U** rows skew to manufacturer-specific
+  (`P0100` to `P1918`). Its **C/B/U** rows skew to manufacturer-specific
   ranges (`C1xxx`, `B1xxx`, `U1xxx`; Ford-heavy) and it does **not** include the
   SAE-generic `C0xxx` / `B0xxx` / `U0xxx` network blocks (e.g. `U0100` is absent).
 - Some descriptions reflect this source's wording rather than the latest J2012

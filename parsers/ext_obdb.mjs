@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // ext_obdb.mjs — external live-data scaling layer from the OBDb community project.
-// Zero-dependency Node ESM (Node v22). Fetches BMW signalset JSON over HTTPS and
-// flattens it into one streaming NDJSON row per signal.
+// Zero-dependency Node ESM (Node v22). By default copies the committed snapshot
+// external/obdb/obd_signal.ndjson (no network, reproducible). With --refresh it fetches the BMW signalset
+// JSON over HTTPS from unpinned upstream branches, flattens it into one NDJSON row per signal, and
+// rewrites the snapshot.
 //
 // SOURCE: OBDb — https://github.com/OBDb  (org of per-model repos: OBDb/BMW-*)
 // LICENSE: CC-BY-SA-4.0  (attribution + share-alike; recorded in external/obdb/SOURCE.md)
@@ -230,8 +232,19 @@ function parseSignalset(doc, repo, emit) {
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
+// Reproducible by default: copy the committed snapshot. Pass --refresh to re-fetch from OBDb
+// (unpinned upstream main branches); that also rewrites the snapshot so the change is reviewable.
+const SNAPSHOT = path.join(REPO, 'external', 'obdb', 'obd_signal.ndjson');
+const REFRESH = process.argv.includes('--refresh');
+
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
+  if (!REFRESH) {
+    if (!fs.existsSync(SNAPSHOT)) { console.error('ext_obdb: missing snapshot ' + SNAPSHOT + ' (run with --refresh to fetch)'); process.exit(1); }
+    fs.copyFileSync(SNAPSHOT, OUT_FILE);
+    console.error('ext_obdb: copied committed snapshot -> ' + OUT_FILE);
+    return;
+  }
   const logs = [];
   const log = (m) => logs.push(m);
 
@@ -308,6 +321,7 @@ async function main() {
     out.on('finish', resolve);
     out.on('error', reject);
   });
+  fs.copyFileSync(OUT_FILE, SNAPSHOT);   // --refresh: update the committed snapshot
 
   const report = {
     discoverySource,

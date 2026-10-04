@@ -1,4 +1,4 @@
-#!/usr/bin/env node --experimental-sqlite
+#!/usr/bin/env -S node --experimental-sqlite
 // Assemble all NDJSON layers into dist/bmw.sqlite + dist/json/* views.
 // Adds cross-layer ecu_node graph, dimension tables, provenance, and FTS5 search.
 // NOTE: SQL(...) is a thin wrapper over node:sqlite's DatabaseSync exec() (NOT shell exec).

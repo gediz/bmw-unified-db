@@ -59,7 +59,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, '..', '..');
+const REPO = (process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(__dirname, '..', '..'));
 const SRC_DIR = path.join(REPO, 'bmw-advanced-tools', 'app', 'EDIABAS', 'EnglishEcu');
 const OUT_DIR = path.resolve(__dirname, '..', 'build', 'english');
 const SGBD_VARIANT = path.resolve(__dirname, '..', 'build', 'sgbd', 'ecu_variant.ndjson');

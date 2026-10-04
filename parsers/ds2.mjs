@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(__dirname, "..", "..");
+const REPO = process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(__dirname, "..", "..");
 
 const SRC_DIR = resolve(REPO, "j2534/examples/ds2/src");
 const JOBS_TS = resolve(SRC_DIR, "ms43-jobs.ts");

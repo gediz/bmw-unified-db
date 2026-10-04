@@ -1,18 +1,19 @@
 {
-  "note": "Pinned source repositories for the BMW unified DB build. Each repo is cloned into <targetDir>/<name> at the exact pinned commit. Run fetch-sources.mjs to materialize, then build with BMW_REPO_ROOT=./sources. bmw-advanced-tools uses a sparse-checkout 'paths' list because the upstream repo is ~2.5GB and we only need a few files.",
+  "note": "Pinned source repositories for the BMW unified DB build. Each repo is cloned into <targetDir>/<name> at the exact pinned commit (full 40-char SHA; fetch-sources.mjs and build.mjs verify it). Repos with a 'paths' list use a sparse checkout of only what the parsers read: bmw-advanced-tools is ~2.5GB upstream, openpilot ~1.2GB. The list of ECU binaries (build/meta/local_binaries.txt) is read from git metadata, so the app/EDIABAS/ECU/*.prg binaries (about 1.1 GB) are never downloaded; the sparse checkout is still about 1.5 GB.",
   "targetDir": "sources",
   "repos": [
     {
       "name": "ediabasx-docs-sgbd",
       "url": "https://github.com/emdzej/ediabasx-docs-sgbd",
-      "commit": "b644de8fbfbb"
+      "commit": "b644de8fbfbb4b207f57794e3c7894dc1dc58627"
     },
     {
       "name": "bmw-advanced-tools",
       "url": "https://git.0x45.cz/em/bmw-advanced-tools",
-      "commit": "f743fd5cb15e",
+      "commit": "f743fd5cb15e787da7404f2a0b2d1797af79f8ad",
       "paths": [
         "app/EDIABAS/ECU/T_GRTB.PRG",
+        "app/EDIABAS/ECU/[Gg]_*.[Gg][Rr][Pp]",
         "app/EDIABAS/EnglishEcu",
         "app/NCSEXPER",
         "app/EC-APPS/NFS",
@@ -23,32 +24,39 @@
     {
       "name": "opendbc",
       "url": "https://github.com/BMW-E8x-E9x/opendbc",
-      "commit": "5282ed5fe6a2"
+      "commit": "5282ed5fe6a2653e9899b66fdef50b70b9c4ef5c",
+      "paths": [
+        "opendbc/dbc/bmw_e9x_e8x.dbc",
+        "README.md"
+      ]
     },
     {
       "name": "openpilot",
       "url": "https://github.com/BMW-E8x-E9x/openpilot",
-      "commit": "51113899d1fb"
+      "commit": "51113899d1fbe5803b2836552c55dd318a220b1c",
+      "paths": [
+        "selfdrive/car/bmw/"
+      ]
     },
     {
       "name": "j2534",
       "url": "https://github.com/emdzej/j2534",
-      "commit": "3422fd17654b"
+      "commit": "3422fd17654bc5f0e3ae701228b189c4fa27bef2"
     },
     {
       "name": "BMW_coding",
       "url": "https://github.com/dzid26/BMW_coding",
-      "commit": "4cd6b8ebf169"
+      "commit": "4cd6b8ebf169aead2db590d903b61866ba4fc3f2"
     },
     {
       "name": "diesel-x5m",
       "url": "https://github.com/yarik-vv/diesel-x5m",
-      "commit": "057e9b4d6f6d"
+      "commit": "057e9b4d6f6dd4c7143732c727069f6ebf5058cb"
     },
     {
       "name": "bmw-f",
       "url": "https://github.com/packetpilot/bmw-f",
-      "commit": "7db51ef8d1fe"
+      "commit": "7db51ef8d1fe982a6b911da9f97ed555dd299056"
     }
   ]
 }

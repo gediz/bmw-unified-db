@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
-const SRC_DIR = (process.env.BMW_REPO_ROOT || path.resolve(import.meta.dirname, '..', '..')) + '/bmw-advanced-tools/app/EC-APPS/INPA/SGDAT';
+const SRC_DIR = path.join(process.env.BMW_REPO_ROOT ? path.resolve(process.env.BMW_REPO_ROOT) : path.resolve(import.meta.dirname, '..', '..'), 'bmw-advanced-tools/app/EC-APPS/INPA/SGDAT');
 const OUT_DIR = path.join(REPO, 'build', 'measurement');
 const OUT_FILE = path.join(OUT_DIR, 'measurement.ndjson');
 

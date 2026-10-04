@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, '..');
-const SRC = resolve(REPO, '../bmw-advanced-tools/app/EC-APPS/NFS/DATA/gdaten');
+const SRC = resolve(process.env.BMW_REPO_ROOT ? resolve(process.env.BMW_REPO_ROOT) : resolve(REPO, '..'), 'bmw-advanced-tools/app/EC-APPS/NFS/DATA/gdaten');
 const OUT = resolve(REPO, 'build/flash');
 
 const F = {
