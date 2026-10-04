@@ -6,9 +6,10 @@ this database or build on it, keep this file and the attributions in it.
 
 All layers are merged into one `bmw.sqlite`. The per-part licensing is also machine-readable inside
 the database itself, in the `data_source` table (one row per layer with its origin, upstream,
-license, SPDX id, and transformation). Two merged layers place obligations on the combined file:
-`obd_signal` is CC-BY-SA-4.0 (share-alike) and `fdl_code` is GPL-3.0 (copyleft). Honor those for
-those layers when redistributing the whole.
+license, SPDX id, and transformation). Three merged layers place obligations on the combined file:
+`obd_signal` is CC-BY-SA-4.0 (share-alike), the `vin_wmi` rows with `source = 'wikibooks'` are CC-BY-SA
+(share-alike), and `fdl_code` is GPL-3.0 (copyleft). Honor those for those layers when redistributing the
+whole.
 
 ## Not affiliated with BMW
 
@@ -66,6 +67,7 @@ here and in the `data_source` table:
 - [OBDb](https://github.com/OBDb): live-data signal definitions and scaling. CC-BY-SA-4.0 (share-alike).
 - [packetpilot/bmw-f](https://github.com/packetpilot/bmw-f) (`cheats/*.xml`): F/G-series FDL coding labels (2,674, de-duped). GPL-3.0; underlying values derive from BMW PSdZData CAFD.
 - [NHTSA vPIC](https://vpic.nhtsa.dot.gov/): VIN structural decode. US public domain.
+- [Wikibooks, Vehicle Identification Numbers (VIN codes)](https://en.wikibooks.org/wiki/Vehicle_Identification_Numbers_(VIN_codes)): the BMW-group WMI to brand and plant mapping in the `vin_wmi` rows with `source = 'wikibooks'`. CC BY-SA.
 - [mytrile/obd-trouble-codes](https://github.com/mytrile/obd-trouble-codes): ISO 15031 / SAE J2012 generic codes. MIT.
 - [python-udsoncan](https://github.com/pylessard/python-udsoncan) by pylessard: ISO 14229 standard data identifier names. MIT.
 - [jakkuh/bmw-vin-decoder](https://github.com/jakkuh/bmw-vin-decoder): VIN parser reference. MIT.

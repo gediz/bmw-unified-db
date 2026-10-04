@@ -136,7 +136,7 @@ const sgbdKey = (name) =>
 // chassis code from a SP-DATEN filename prefix, e.g. E46SGET.000 -> E46,
 // K24AT.000 -> K24, R56AT.000 -> R56.
 function chassisFromFilename(name) {
-  const m = name.match(/^([A-Z]\d{2}|K\d{2}X?|KH\d|K\d X|RR\d|R\d{2})/i);
+  const m = name.match(/^([A-Z]\d{2}|K\d{2}X?|KH\d|K\d X|RR\d|R\d{2}|K\dX)/i);  // K1X: Motorrad file-family code
   return m ? m[1].toUpperCase().replace(/\s+/g, '') : null;
 }
 
@@ -292,9 +292,11 @@ function buildVehicleEcu() {
   const stats = { files: 0, records: 0, sget: 0, sgvt: 0 };
   if (!existsSync(DATEN_DIR)) { warn(`SP-DATEN dir missing: ${DATEN_DIR}`); return stats; }
   const targets = collectDatenFiles();
-  // de-dup file paths: the E39 super-dir re-bundles other chassis' files that
-  // also exist as top-level *.000; keep all but rely on emit() dedup. Use a
-  // realpath-ish key on (chassis,file) to avoid double-counting identical files.
+  // One SGET/SGVT per chassis. DATEN/E39/ re-bundles older, smaller copies of other chassis' files,
+  // so a chassis's own directory (DATEN/E46/E46SGET.000) wins over the bundle; the bundle stays the
+  // only source for chassis without their own directory (E31, E32, E34).
+  const ownDir = (t) => path.basename(path.dirname(t.full)).toUpperCase() === String(t.chassis).toUpperCase() ? 0 : 1;
+  targets.sort((a, b) => ownDir(a) - ownDir(b));
   const seenFile = new Set();
   for (const t of targets) {
     const fk = `${t.chassis}|${t.kind}`;
@@ -391,13 +393,32 @@ function parseZstLine(line, chassis, file) {
   return { code, keyword, meaning, isComment, chassis, file };
 }
 
+// Top-level DATEN files of one kind, plus subdirectory copies for chassis that have no top-level
+// file (E31/E32/E34 ZST exist only under DATEN/E39/). Own-directory copies win over the E39 bundle.
+// Returns DATEN-relative paths; top-level files stay bare names as before.
+function datenFilesOfKind(re) {
+  const top = readdirSync(DATEN_DIR).filter((n) => re.test(n)).sort();
+  const have = new Set(top.map(chassisFromFilename));
+  const sub = [];
+  for (const d of readdirSync(DATEN_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()) {
+    for (const n of readdirSync(path.join(DATEN_DIR, d)).filter((n) => re.test(n)).sort()) {
+      const ch = chassisFromFilename(n);
+      if (!have.has(ch)) sub.push({ rel: d + '/' + n, ch, own: d.toUpperCase() === String(ch).toUpperCase() ? 0 : 1 });
+    }
+  }
+  sub.sort((a, b) => a.own - b.own || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  const picked = new Set(), extra = [];
+  for (const x of sub) if (!picked.has(x.ch)) { picked.add(x.ch); extra.push(x.rel); }
+  return top.concat(extra);
+}
+
 function buildOptionFromZst() {
   const stats = { files: 0, lines: 0, emitted: 0 };
   let files;
-  try { files = readdirSync(DATEN_DIR).filter((n) => /ZST\.000$/i.test(n)).sort(); }
+  try { files = datenFilesOfKind(/ZST\.000$/i); }
   catch (e) { warn(`ZST scan: ${e.message}`); return stats; }
   for (const f of files) {
-    const chassis = chassisFromFilename(f);
+    const chassis = chassisFromFilename(path.basename(f));
     let text;
     try { text = decodeText(readFileSync(path.join(DATEN_DIR, f))); }
     catch (e) { warn(`read ${f}: ${e.message}`); continue; }
@@ -474,10 +495,10 @@ function parseAtLine(line, chassis, file) {
 function buildOptionFromAt() {
   const stats = { files: 0, emitted: 0 };
   let files;
-  try { files = readdirSync(DATEN_DIR).filter((n) => /AT\.000$/i.test(n)).sort(); }
+  try { files = datenFilesOfKind(/AT\.000$/i); }
   catch (e) { warn(`AT scan: ${e.message}`); return stats; }
   for (const f of files) {
-    const chassis = chassisFromFilename(f);
+    const chassis = chassisFromFilename(path.basename(f));
     let text;
     try { text = decodeText(readFileSync(path.join(DATEN_DIR, f))); }
     catch (e) { warn(`read ${f}: ${e.message}`); continue; }

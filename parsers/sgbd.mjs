@@ -71,7 +71,8 @@ const DTC_SIDS = new Set(['19', '14']);
 
 // Chassis whitelist: BMW model platform tokens. Letter + 2 digits for E/F/G/U/I,
 // RR + 1 digit, K + 2 digits (motorcycle/legacy). Excludes obvious noise.
-const CHASSIS_RE = /\b(?:E\d{2}|F\d{2}|G\d{2}|U\d{2}|I\d{2}|RR\d|K\d{2})\b/g;
+// MINI R50-R61 only: an open R\d{2} would catch Rover R40/R41, 'BDC R62' and 'R00 Software'.
+const CHASSIS_RE = /\b(?:E\d{2}|F\d{2}|G\d{2}|U\d{2}|I\d{2}|RR\d|K\d{2}|R5\d|R6[01])\b/g;
 function parseChassis(...texts) {
   const set = new Set();
   for (const t of texts) {
@@ -361,11 +362,16 @@ async function parseFile(filePath, sgbd, caveats) {
           const hexM = codeRaw.match(/0[xX]([0-9A-Fa-f]+)/) || codeRaw.match(/^([0-9A-Fa-f]{4,6})$/);
           if (hexM) {
             const hex = hexM[1].toUpperCase();
-            const ev = cells.length >= 3 ? cells[2].trim() : '';
+            // text and event flag by header name: some tables put ORT/INDEX/SA/HILFE before ORTTEXT
+            // or FA_BYTE after it. The code stays cells[0] so published codes do not move.
+            const h = (curTable.header || []).map((x) => String(x).trim().toUpperCase());
+            const ti = h.indexOf('ORTTEXT');
+            const ei = h.findIndex((x) => x === 'EREIGNIS_DTC' || x === 'EREIGNIS');
+            const ev = ei >= 0 ? String(cells[ei] ?? '').trim() : (h.length ? '' : (cells.length >= 3 ? cells[2].trim() : ''));
             emit('dtc', {
               sgbd,
               code: '0x' + hex,
-              location_text: cells[1],
+              location_text: cells[ti >= 0 ? ti : 1],
               event_dtc: /^1$/.test(ev) ? 1 : (/^0$/.test(ev) ? 0 : null),
               source_table: upper,
             });

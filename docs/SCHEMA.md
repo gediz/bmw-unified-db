@@ -1,6 +1,6 @@
 # Schema reference
 
-The database has 46 tables and 8 views. This document describes each one and the columns that matter. For how the
+The database has 47 tables and 8 views. This document describes each one and the columns that matter. For how the
 data was sourced see the [README](../README.md), and how it was verified see [VERIFICATION.md](VERIFICATION.md).
 
 ## Conventions
@@ -17,13 +17,20 @@ data was sourced see the [README](../README.md), and how it was verified see [VE
   `can_message.id_hex`, `ds2_*.code/id`, `ecu_bus.id_hex`.
 - Booleans are `0` or `1`.
 - `is_stub = 1` on `ecu_variant` marks an ECU known only from a catalog (routing, coding, flash,
-  measurement) with no decoded SGBD page. Its content columns are empty.
+  measurement) with no decoded SGBD page. Its content columns are empty, and its `ecu_name` is the ECU
+  type from the flash database (usually the uppercased `sgbd`).
 
 ## Diagnostics
 
 `ecu_variant` is the spine, one row per ECU. Key columns: `sgbd` (primary key), `ecu_name`,
 `chassis` (JSON array), `protocol` (UDS, KWP, DS2, or unknown), `is_uds`, `job_count`, `table_count`,
 `ecu_family`, `file_kind`, and the capability and presence flags below.
+
+`ecu_family` groups variants by their SGBD name: the engine controllers are `DME` (petrol) and `DDE`
+(diesel), and the flash-slot prefix is ignored, so `06msd80` is a `DME`. Group files (`file_kind = 'GRP'`)
+have no family. `chassis` is the union of the SGBD's own text, every routing row, and the SP-DATEN
+installation lists. `ecu_name` is BMW's INFO text; where that is only the SGBD id or empty, the single
+routing name is used, and template placeholders are left NULL.
 
 Capability flags describe what the ECU supports, derived from its jobs: `has_coding`, `has_flash`,
 `has_dtc`, `has_actuator`. Presence flags describe what this database holds for it: `has_routing`,
@@ -50,23 +57,42 @@ A runtime fault is a location code plus a type code. These four tables resolve i
 - `dtc_type` (`sgbd`, `code`): fault type and status text. `type_text`.
 - `dtc_class` (`sgbd`, `code`): fault severity class. `class_text`.
 - `dtc_env` (`sgbd`, `code`): freeze-frame field definitions. `text`, `unit`, `name`, and the scaling
-  `mul`, `div`, `add_offset` (engineering value = raw * mul / div + add_offset). The source tables use
-  18 different column layouts, so these are mapped by column name, not by position. Where a layout
-  carries no scaling columns, `mul`, `div`, and `add_offset` are null.
+  `mul`, `div`, `add_offset` (engineering value = raw * mul / div + add_offset; a NULL `div` means 1 and a
+  NULL `add_offset` means 0). The source tables use 18 different column layouts, so these are mapped by
+  column name, not by position. Decimal commas in the source are stored with a dot. Older layouts with
+  `UWF_A` and `UWF_B` map to `mul` and `add_offset`. The scaling is NULL where a layout has no scaling
+  columns or where its meaning is ambiguous (the `bms*` layouts with a third `UWF_C` divisor). A `UWF_A`
+  of 0 marks a status or placeholder field and is stored as NULL scaling.
 
 ## English
 
 The `EnglishEcu` binaries are only partially translated, so these are tagged by language.
 
 - `english_dtc` (`sgbd`, `code`): English fault location text with a `lang` tag (`en`, `de`, `mixed`,
-  `unknown`). Only `en` and `mixed` rows that differ from the German were merged into `dtc`.
+  `unknown`). Only `en` and `mixed` rows that differ from the German, apart from a leading code, case, or
+  spacing, were merged into `dtc`. A row is merged from its own table (`FORTTEXTE` or `IORTTEXTE`); text
+  from the other table is used only when that table has the same German for the code, or none.
 - `english_job` (`sgbd`, `job`): the few English job descriptions recoverable as plain text.
 
 ## Routing
 
 - `routing` (`sgbd`): the phone book. `ecu_group` (for example `G_AIRBAG`), `diag_address`
-  (the ECU address, `ID_SG_ADR`), `sgbd_index` (the variant id, `ID_SGBD_INDEX`), `chassis`, `source`.
-  Self-derived from the binary `T_GRTB.PRG`.
+  (the ECU address, `ID_SG_ADR`, at least two hex digits such as `0x07`), `sgbd_index`, `chassis`,
+  `source`. Self-derived from the binary `T_GRTB.PRG` (`source = 'prg'`) and the SP-DATEN SGET files
+  (`source = 'spdaten'`). For UDS ECUs `sgbd_index` is the real `ID_SGBD_INDEX`. For older KWP and DS2
+  rows the source only has a per-group variant id in that position (short values such as `0x1`), which is
+  unique only together with `ecu_group`. An ECU can have several routing rows.
+
+## Engine codes
+
+- `ecu_engine` (`sgbd`, `engine`): the engine codes BMW's own ECU name mentions, for example
+  `MS 43.0 fuer M54 mit EWS 3` gives `M54`. `engine` is the engine family (`M57`), `engine_variant` the
+  code as written (`M57TUE2`). `relation` is `engine_ecu` when the module is the engine controller and
+  `fitted_with` when it names the engine of the car it is fitted to (an ASC or DSC unit). Only real BMW
+  engine families are kept, so Bosch part names such as `M401` never match, and a code right after the
+  Siemens unit prefix (`MS S65`) is the unit's name, not its engine. `source` is `ecu_name`, or `routing`
+  when the ECU's own name names no engine and BMW's routing name does. Derived in this repo; no outside
+  source.
 
 ## Coding
 
@@ -82,9 +108,13 @@ The `EnglishEcu` binaries are only partially translated, so these are tagged by 
 
 ## Applicability
 
-- `vehicle_ecu` (`chassis`, `ecu_group`): which ECUs are installed per chassis, with `sgbd` and `cbd`.
-  E-series and MINI only.
+- `vehicle_ecu` (`chassis`, `ecu_group`): which ECUs are installed per chassis, with `sgbd`,
+  `ecu_variant`, `cbd`, and `source_file`. E-series and MINI only. Each chassis is read from its own
+  SP-DATEN directory; the copies bundled under `DATEN/E39/` are used only for E31, E32, and E34, which have
+  no directory of their own. Rows from `*SGVT` files are version records with a NULL `sgbd`.
 - `option_code` (`code`): the SALAPA option dictionary. `meaning`, `keyword`, `chassis`, `kind`, `fa`.
+  Also holds BMW Motorrad AT files. `K1X` is a Motorrad file-family code shared by several bike models,
+  not a single chassis.
 
 ## Identification and flash
 
@@ -130,8 +160,9 @@ DIDs). See [CREDITS.md](../CREDITS.md).
 - `generic_dtc` (`code`): ISO 15031 / SAE J2012 generic OBD2 codes, from
   [mytrile/obd-trouble-codes](https://github.com/mytrile/obd-trouble-codes). `description`, `category`,
   `is_generic`. MIT.
-- `vin_wmi` (`wmi`) and `vin_position` (`position`): BMW VIN structural decode
-  ([NHTSA vPIC](https://vpic.nhtsa.dot.gov/) and ISO 3779). Public domain and ISO.
+- `vin_wmi` (`wmi`) and `vin_position` (`position`): BMW VIN structural decode. Rows with
+  `source = 'nhtsa-vpic'` come from [NHTSA vPIC](https://vpic.nhtsa.dot.gov/) (public domain). Rows with
+  `source = 'wikibooks'` come from the Wikibooks VIN page (CC BY-SA). Positions follow ISO 3779.
 - `uds_did_standard` (`did`): ISO 14229 standard DataIdentifier names, from
   [python-udsoncan](https://github.com/pylessard/python-udsoncan). MIT.
 - `fdl_code` (`ecu`, `fsw_label`): F/G-series FDL coding labels, 2,674 across 95 CAFDs, from the
@@ -139,6 +170,8 @@ DIDs). See [CREDITS.md](../CREDITS.md).
   (de-duped on the coding write). `series` is the per-chassis applicability; `chassis_family` is F, G, I,
   or RR derived from it; `byte_start`/`byte_end`/`mask`/`raw_value` are the write, `meaning` and `comment`
   the human text. GPL-3.0; the underlying values derive from BMW PSdZData CAFD definitions.
+  `chassis_family` is NULL when the cheat file names no series (505 rows) or names an I-step platform
+  such as `S18A` rather than a chassis (113 rows); the raw `series` value is kept.
 
 ## Views
 
@@ -146,11 +179,15 @@ Eight views are the everyday surface. Use them instead of joining the base table
 [COOKBOOK.md](COOKBOOK.md) for runnable queries.
 
 - `v_resolve`: the identity resolver. Any identifier (`alias`) maps to its ECU `sgbd` and name. Backed
-  by `ecu_alias`, which holds 19,332 aliases of seven types: `sgbd`, `family`, `ecu_group`,
-  `sgbd_index`, `diag_address`, `hwnr` (hardware part number), and `ecu_type`. This is how a part
-  number, a group, or an address all resolve to one ECU.
-- `v_ecu`: one row per ECU joining identity, family, chassis, routing address, group, bus, and the
-  counts and flags.
+  by `ecu_alias`, which holds 18,640 aliases of eight types: `sgbd`, `family`, `ecu_group`,
+  `sgbd_index`, `diag_address`, `hwnr` (hardware part number), `ecu_type`, and `engine`. This is how a
+  part number, a group, an address, or an engine code all resolve to one ECU. Lookups are
+  case-sensitive; use `COLLATE NOCASE` for a case-insensitive match. Filter on `alias_type` for hex
+  values, which can be both an address and a variant id.
+- `v_ecu`: one row per ECU joining identity, family, chassis, routing address, group, bus, engine codes
+  (`engines`), and the counts and flags. When an ECU has several routing rows, `ecu_group`,
+  `diag_address`, and `sgbd_index` come from one representative row (T_GRTB first) and `routing_count`
+  says how many there are.
 - `v_fault`: the location dictionary per ECU with German and English text. Pair with `dtc_type` and
   `dtc_class` to resolve a full fault.
 - `v_coding`: the chassis-wide coding catalog with English meanings joined from `translation` and
@@ -160,7 +197,7 @@ Eight views are the everyday surface. Use them instead of joining the base table
 - `v_did`: the diagnostic DIDs we extracted, with a normalized `did_norm` form, cross-linked to their
   ISO 14229 standard names.
 - `v_measurement`: INPA measurements and OBDb live signals in one surface.
-- `v_vehicle_ecu`: which ECUs are installed per chassis, with names.
+- `v_vehicle_ecu`: which ECUs are installed per chassis, with names, variant, `cbd`, and source file.
 
 `ecu_alias` (`alias_type`, `alias`, `sgbd`) is the resolver's backing table. Identifiers are
 normalized where it matters: DIDs carry a `did_norm` column (`0x` plus uppercase hex) on both
@@ -182,7 +219,7 @@ normalized where it matters: DIDs carry a `did_norm` column (`0x` plus uppercase
 
 - `ecu-index.json`: a flat list of the addressable ECUs. Each entry carries `ecuGroup`, `protocol`,
   `isUds`, `diagAddress`, `sgbdIndex`, `sgbd`, `ecuName`, and `chassis`.
-- `variants/<sgbd>.json`: one file per ECU, 3,083 in total. Each holds the ECU's identity, routing, bus,
-  jobs, tables, the full fault list (location, type, class, and freeze-frame), measurements, hardware
+- `variants/<sgbd>.json`: one file per ECU, 3,083 in total. Each holds the ECU's identity, routing (the
+  representative row, plus every row in `routes`), bus, engine codes (`engines`), jobs, tables, the full fault list (location, type, class, and freeze-frame), measurements, hardware
   part numbers, flash references, coding examples and raw coding images, and English job text.
 - `index.json`: the row counts and coverage figures, the same content as the `meta` table.

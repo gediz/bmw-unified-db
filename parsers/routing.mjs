@@ -71,16 +71,18 @@ const MAGIC = '@EDIABAS OBJECT';
 const outPath = path.join(OUT_DIR, 'routing.ndjson');
 const writer = createWriteStream(outPath);
 let rowCount = 0;
-// dedup key so we don't emit identical (sgbd, group, address, index, source) twice
-const seen = new Set();
+// one row per (sgbd, group, address, index, source); a repeat (the same coding SGBD in several
+// chassis' SGET files) adds its chassis to the first row instead of being dropped. Written in insertion order.
+const rows = new Map();
 function emit(obj) {
   const k = `${obj.sgbd}|${obj.ecu_group}|${obj.diag_address}|${obj.sgbd_index}|${obj.source}`;
-  if (seen.has(k)) return;
-  seen.add(k);
-  writer.write(JSON.stringify(obj) + '\n');
+  const prev = rows.get(k);
+  if (prev) { prev.chassis = [...new Set([...(prev.chassis || []), ...(obj.chassis || [])])].sort(); return; }
+  rows.set(k, { ...obj, chassis: obj.chassis ? [...obj.chassis] : obj.chassis });
   rowCount++;
 }
 function closeOut() {
+  for (const o of rows.values()) writer.write(JSON.stringify(o) + '\n');
   return new Promise((res) => writer.end(res));
 }
 
@@ -139,7 +141,8 @@ function parseAddrCell(cell) {
     if (isHex(toks[i])) { index = toks[i].toUpperCase(); break; }
   }
   return {
-    diag_address: addr ? '0x' + addr.replace(/^0+(?=.)/, '') : null,
+    // two-digit minimum, as BMW writes ID_SG_ADR ('07' -> 0x07) and as OBDb headers derive it
+    diag_address: addr ? '0x' + addr.replace(/^0+(?=.)/, '').padStart(2, '0') : null,
     sgbd_index: index ? '0x' + index.replace(/^0+(?=.)/, '') : null,
   };
 }
@@ -302,7 +305,8 @@ function parseSget(caveats) {
       } else if (/SGET\.000$/i.test(e.name)) {
         // chassis prefix from filename, e.g. E46SGET.000 -> E46
         const m = e.name.match(/^([A-Z]\d{2,3}|K\d+X|RR\d)/i);
-        targets.push({ full, chassis: chassisHint || (m ? m[1].toUpperCase() : null), file: e.name });
+        // the filename wins: DATEN/E39/ also bundles E46SGET.000, R50SGET.000 etc., which are not E39
+        targets.push({ full, chassis: (m ? m[1].toUpperCase() : null) || chassisHint, file: e.name });
       }
     }
   };

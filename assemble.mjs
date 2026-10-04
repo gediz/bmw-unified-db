@@ -120,6 +120,8 @@ const relPath = (v) => typeof v === 'string'
 
 async function load(tbl) {
   const cols = TABLES[tbl]
+  // node:sqlite binds JS numbers as REAL, so 12 lands in a TEXT column as '12.0'; bind whole numbers as text there
+  const textCols = new Set(db.prepare(`PRAGMA table_info(${tbl})`).all().filter(c => /TEXT/i.test(c.type)).map(c => c.name))
   const file = path.join(BUILD, SOURCES[tbl] + '.ndjson')
   if (!existsSync(file)) { console.log(`  ! ${tbl}: source missing`); return 0 }
   const stmt = db.prepare(`INSERT INTO ${tbl} (${cols.map(c=>'"'+c+'"').join(',')}) VALUES (${cols.map(()=>'?').join(',')})`)
@@ -134,6 +136,7 @@ async function load(tbl) {
       if (v === undefined || v === null) return null
       if (JSONCOLS.has(c) && typeof v === 'object') return JSON.stringify(v)
       if (typeof v === 'boolean') return v ? 1 : 0
+      if (typeof v === 'number' && Number.isInteger(v) && textCols.has(c)) return String(v)
       if (FILECOLS.has(c) && typeof v === 'string' && v.includes('/')) return relPath(v)
       return v
     })
@@ -193,11 +196,46 @@ console.log('Normalizing (names, orphan stubs, chassis) ...')
   SQL('BEGIN'); let n = 0; for (const r of rows){ const nc = scrub(r.description); if (nc !== r.description){ up.run(nc || null, r.rowid); n++ } } SQL('COMMIT')
   console.log('  job descriptions scrubbed:', n)
 }
+// PII: named individuals and department codes in ECU names, comments, result comments and table cells.
+// A closed, anchored set (full-census scan), so no technical token such as KL-15 is touched.
+{ const scrubName = (s) => s.replace(/\s*fuer Hrn?\.\s+[A-ZÄÖÜ][a-zäöüß]+/, '').replace(/^Dummydatei\s+[A-Z][a-z]+$/, 'Dummydatei')
+  const scrubComment = (s) => s.replace(/\s*mit VS-22,\s*Hr\.\s+[A-ZÄÖÜ][a-zäöüß]+\s+\d{2}\.\d{2}\.\d{2}/, '').replace(/\s*bei EA-250\b/, '')
+  const scrubResult = (s) => s.replace(/\s*\(bis Funktion durch Hr\.\s+[A-ZÄÖÜ][a-zäöüß]+ abgestimmt\)/, '')
+  const scrubCell = (s) => s.replace(/\s*\(Hr\.\s+[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?\s+[A-Z]{2}-\d{2,3}\)/, '')
+    .replace(/\s*\([A-ZÄÖÜ][a-zäöüß]+ [A-ZÄÖÜ][a-zäöüß]+, [A-Z]{2}-\d{2,3}\)/, '')   // '(Surname Firstname, EA-402)'
+  let n = 0
+  const fix = (sel, upd, f, json) => { const up = db.prepare(upd); SQL('BEGIN')
+    for (const r of db.prepare(sel).all()){
+      const nv = json ? JSON.stringify(JSON.parse(r.v).map(c => typeof c === 'string' ? f(c) : c)) : f(r.v)
+      if (nv !== r.v){ up.run(nv, r.id); n++ } }
+    SQL('COMMIT') }
+  fix("SELECT rowid id, ecu_name v FROM ecu_variant WHERE ecu_name GLOB '*Hrn. *' OR ecu_name GLOB 'Dummydatei *'", 'UPDATE ecu_variant SET ecu_name=? WHERE rowid=?', scrubName)
+  fix("SELECT rowid id, comment v FROM ecu_variant WHERE comment GLOB '*Hr. *' OR comment GLOB '*EA-250*'", 'UPDATE ecu_variant SET comment=? WHERE rowid=?', scrubComment)
+  fix("SELECT rowid id, comment v FROM job_result WHERE comment GLOB '*Hr. [A-Z]*'", 'UPDATE job_result SET comment=? WHERE rowid=?', scrubResult)
+  fix("SELECT rowid id, cells v FROM table_row WHERE cells GLOB '*(Hr. [A-Z]*' OR cells GLOB '*([A-Z][a-z]* [A-Z][a-z]*, [A-Z][A-Z]-[0-9]*'", 'UPDATE table_row SET cells=? WHERE rowid=?', scrubCell, true)
+  console.log('  personal names scrubbed:', n)
+  // guard: fail the build if a personal-name pattern survives in any free-text column
+  const NAME_GLOBS = ['*Hr. [A-Z][a-z]*', '*Hrn. [A-Z][a-z]*', '*Herrn [A-Z][a-z]*', '*Frau [A-Z][a-z]*', 'Dummydatei *',
+    '*([A-Z][a-z]* [A-Z][a-z]*, [A-Z][A-Z]-[0-9]*']
+  for (const [t, c] of [['ecu_variant','ecu_name'],['ecu_variant','comment'],['job','description'],['job_result','comment'],['job_arg','comment'],['table_row','cells']]){
+    const hit = db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE ${NAME_GLOBS.map(g => `"${c}" GLOB '${g}'`).join(' OR ')}`).get().c
+    if (hit) throw new Error(`PII guard: ${hit} personal-name match(es) left in ${t}.${c}`) } }
 // (a) strip address/index annotations that leaked into some ECU names
 { const rows = db.prepare('SELECT sgbd, ecu_name FROM ecu_variant WHERE ecu_name IS NOT NULL').all()
   const up = db.prepare('UPDATE ecu_variant SET ecu_name=? WHERE sgbd=?')
-  const clean = s => s.replace(/[\s,;]*\b(SGBD[-\s]?Index\s*[:=]?\s*(0x)?0?F[0-9A-F]+\s*(hex)?|[0-9A-F]{1,2}\s+0F[0-9A-F]{3,5}|0x0F[0-9A-F]+)\s*\.?\s*$/i, '').replace(/\s{2,}/g, ' ').trim()
+  const clean = s => s.replace(/[\s,;:–-]*\b(SGBD[-\s]?Index\s*[:=]?\s*(0x)?0?F[0-9A-F]+\s*(hex)?|[0-9A-F]{1,2}\s+0F[0-9A-F]{3,5}|0x0F[0-9A-F]+)\s*\.?\s*$/i, '').replace(/\s{2,}/g, ' ').trim()
   SQL('BEGIN'); let n = 0; for (const r of rows){ const c = clean(r.ecu_name); if (c && c !== r.ecu_name){ up.run(c, r.sgbd); n++ } } SQL('COMMIT'); console.log('  cleaned ecu_name:', n) }
+// (a2) template placeholders are not names: '@X@' wrappers keep their inner text, the closed set becomes NULL
+{ SQL(`UPDATE ecu_variant SET ecu_name=substr(ecu_name,2,length(ecu_name)-2) WHERE ecu_name GLOB '@?*@'`)
+  SQL(`UPDATE ecu_variant SET comment=substr(comment,2,length(comment)-2) WHERE comment GLOB '@?*@'`)
+  SQL(`UPDATE ecu_variant SET ecu_name=NULL WHERE ecu_name IN ('-','flsh_uds','genaue Bezeichnung des SG')`)
+  SQL(`UPDATE ecu_variant SET comment=NULL WHERE comment='-'`) }
+// (a3) a decoded ECU named only by its own id (or unnamed) takes BMW's routing name, when routing has exactly one
+{ const n = db.prepare(`UPDATE ecu_variant SET ecu_name=(SELECT MAX(r.ecu_name) FROM routing r WHERE r.sgbd=ecu_variant.sgbd AND COALESCE(r.ecu_name,'')<>'')
+    WHERE COALESCE(is_stub,0)=0 AND (ecu_name IS NULL OR UPPER(ecu_name)=UPPER(sgbd))
+      AND (SELECT COUNT(DISTINCT r.ecu_name) FROM routing r WHERE r.sgbd=ecu_variant.sgbd AND COALESCE(r.ecu_name,'')<>'')=1
+      AND (SELECT UPPER(MAX(r.ecu_name)) FROM routing r WHERE r.sgbd=ecu_variant.sgbd AND COALESCE(r.ecu_name,'')<>'')<>UPPER(sgbd)`).run().changes
+  console.log('  ecu_name taken from routing:', n) }
 // (b) every routing.sgbd should resolve to an ecu_variant row; add minimal stubs for any missing
 { const orphans = db.prepare("SELECT r.sgbd, r.ecu_name, r.chassis FROM routing r LEFT JOIN ecu_variant v ON v.sgbd=r.sgbd WHERE v.sgbd IS NULL GROUP BY r.sgbd").all()
   const ins = db.prepare("INSERT OR IGNORE INTO ecu_variant(sgbd,ecu_name,chassis,protocol,is_uds,job_count,table_count,has_coding,has_flash,has_dtc,has_actuator,file_kind,is_stub) VALUES(?,?,?,?,0,0,0,0,0,0,0,?,1)")
@@ -215,13 +253,23 @@ console.log('Normalizing (names, orphan stubs, chassis) ...')
       UNION SELECT sgbd FROM ds2_job WHERE sgbd IS NOT NULL
       UNION SELECT sgbd FROM ds2_fault WHERE sgbd IS NOT NULL
     ) WHERE sgbd NOT IN (SELECT sgbd FROM ecu_variant)`).all()
-  const nameFor = db.prepare("SELECT COALESCE((SELECT at_name FROM ecu_hwnr WHERE sgbd=:s AND at_name<>'' LIMIT 1),(SELECT ecu_type FROM ecu_hwnr WHERE sgbd=:s LIMIT 1),(SELECT ecu_module FROM coding_netto WHERE sgbd=:s LIMIT 1)) n")
+  // at_name is a 2-character WinKFP programming code ('QY'), not a name; it stays in ecu_hwnr.at_name
+  const nameFor = db.prepare("SELECT COALESCE((SELECT ecu_type FROM ecu_hwnr WHERE sgbd=:s AND ecu_type<>'' ORDER BY ecu_type LIMIT 1),(SELECT ecu_module FROM coding_netto WHERE sgbd=:s AND ecu_module<>'' ORDER BY ecu_module LIMIT 1)) n")
   const ins = db.prepare("INSERT OR IGNORE INTO ecu_variant(sgbd,ecu_name,chassis,protocol,is_uds,job_count,table_count,has_coding,has_flash,has_dtc,has_actuator,file_kind,is_stub) VALUES(?,?,'[]',NULL,0,0,0,0,0,0,0,NULL,1)")
   SQL('BEGIN'); for (const r of refs){ const n = nameFor.get({ s: r.sgbd }).n; ins.run(r.sgbd, n || r.sgbd) } SQL('COMMIT'); console.log('  catch-all sgbd stubs added:', refs.length) }
-// (c) fill empty variant chassis from the routing table where available
-{ const rt = db.prepare("SELECT sgbd, chassis FROM routing WHERE chassis IS NOT NULL AND chassis<>'[]' GROUP BY sgbd").all()
-  const up = db.prepare("UPDATE ecu_variant SET chassis=? WHERE sgbd=? AND (chassis IS NULL OR chassis='[]')")
-  SQL('BEGIN'); let n = 0; for (const r of rt){ n += (up.run(r.chassis, r.sgbd).changes || 0) } SQL('COMMIT'); console.log('  chassis filled from routing:', n) }
+// (c) UNION chassis from every routing row (T_GRTB and SP-DATEN SGET, each labelled by its own file)
+{ const rows = db.prepare("SELECT sgbd, chassis FROM routing WHERE chassis IS NOT NULL AND chassis<>'[]' ORDER BY sgbd").all()
+  const bySgbd = new Map()
+  for (const r of rows){ let arr = []; try{ arr = JSON.parse(r.chassis) }catch{}
+    if(!bySgbd.has(r.sgbd)) bySgbd.set(r.sgbd, new Set()); for (const c of arr) bySgbd.get(r.sgbd).add(c) }
+  const get = db.prepare('SELECT chassis FROM ecu_variant WHERE sgbd=?')
+  const up = db.prepare('UPDATE ecu_variant SET chassis=? WHERE sgbd=?')
+  SQL('BEGIN'); let n = 0
+  for (const [sgbd, set] of bySgbd){ const cur = get.get(sgbd); if(!cur) continue
+    let arr = []; try{ arr = JSON.parse(cur.chassis||'[]') }catch{}
+    const merged = Array.from(new Set([...arr, ...set])).sort()
+    if (merged.length !== arr.length){ up.run(JSON.stringify(merged), sgbd); n++ } }
+  SQL('COMMIT'); console.log('  chassis enriched from routing:', n) }
 // (d) UNION chassis from the applicability layer (vehicle_ecu: which ECUs are installed per chassis)
 { const rows = db.prepare("SELECT sgbd, chassis FROM vehicle_ecu WHERE sgbd IS NOT NULL AND chassis IS NOT NULL").all()
   const bySgbd = new Map()
@@ -236,16 +284,54 @@ console.log('Normalizing (names, orphan stubs, chassis) ...')
   SQL('COMMIT'); console.log('  chassis enriched from applicability:', n) }
 
 // ---------- derive ecu_family ----------
+// The rules run on the whole sgbd after dropping a 'kopie von' backup prefix and any leading flash-slot
+// digits or underscores ('06msd80' -> 'MSD80', '_gs20' -> 'GS20'), so digit-bearing rules such as ^D\d work.
+const FAMILY_RULES = [
+  [/^MESSEMOD/,'MESSEMOD'],[/^EGS_CAS/,'CAS'],[/^GSD_/,'GSD'],[/^MRSAF/,'MRSAF'],[/^LMV/,'LMV'],
+  [/^ACSM/,'ACSM'],[/^MRS/,'MRS'],[/^SME/,'SME'],[/^HVS/,'HVS'],
+  [/^DME|^ME|^MS|^BMS|^DM\d|^MD\d|^M_?\d|^MVD|^MV\d|^N\d\d|^S\d\d|^EDME|^RDME|^DXE/,'DME'],
+  [/^DDE|^D\d/,'DDE'],[/^EGS|^GS/,'EGS'],[/^DSC|^ASC|^ABS|^DXC/,'DSC'],[/^IHK/,'IHKA'],[/^KOMB|^IKE|^KMBI/,'KOMBI'],
+  [/^CAS/,'CAS'],[/^EWS/,'EWS'],[/^FRM/,'FRM'],[/^LM|^LCM/,'LM'],[/^JBBF|^JBE/,'JBBF'],[/^CIC|^NBT|^CCC|^MASK/,'HU'],
+  [/^SZL/,'SZL'],[/^ZGW|^ZGM/,'ZGW']]
 function family(sgbd){
   if(!sgbd) return null
-  const m = String(sgbd).toUpperCase().match(/^[A-Z]+/)
-  let f = m ? m[0] : sgbd.toUpperCase()
-  for (const [re,name] of [[/^ACSM/,'ACSM'],[/^MRS/,'MRS'],[/^SME/,'SME'],[/^HVS/,'HVS'],[/^DME|^ME|^MS|^MSD|^MSV|^MSS|^MEV|^MED|^BMS/,'DME'],[/^DDE|^D\d/,'DDE'],[/^EGS|^GS/,'EGS'],[/^DSC|^ASC|^ABS|^DXC/,'DSC'],[/^IHK/,'IHKA'],[/^KOMB|^IKE|^KMBI/,'KOMBI'],[/^CAS/,'CAS'],[/^EWS/,'EWS'],[/^FRM/,'FRM'],[/^LM|^LCM/,'LM'],[/^JBBF|^JBE/,'JBBF'],[/^CIC|^NBT|^CCC|^MASK/,'HU'],[/^SZL/,'SZL'],[/^ZGW|^ZGM/,'ZGW']]) if(re.test(f)) return name
-  return f
+  const raw = String(sgbd).toUpperCase()
+  const s = raw.replace(/^KOPIE(?: \(\d+\))? VON /,'').replace(/^[0-9_]+/,'') || raw
+  for (const [re,name] of FAMILY_RULES) if (re.test(s)) return name
+  return (s.match(/^[A-Z]+/) || [s])[0]
 }
-{ const rows = db.prepare('SELECT sgbd FROM ecu_variant').all()
+// group files (D_/G_/H_*.GRP) are routing containers, not ECUs of one family
+{ const rows = db.prepare('SELECT sgbd, file_kind FROM ecu_variant').all()
   const up = db.prepare('UPDATE ecu_variant SET ecu_family=? WHERE sgbd=?')
-  SQL('BEGIN'); for (const r of rows) up.run(family(r.sgbd), r.sgbd); SQL('COMMIT') }
+  SQL('BEGIN'); for (const r of rows) up.run(r.file_kind === 'GRP' ? null : family(r.sgbd), r.sgbd); SQL('COMMIT') }
+
+// ---------- engine codes named in BMW's own ECU names ("MS 43.0 fuer M54 mit EWS 3") ----------
+// Only real BMW engine families count, so Bosch part names (M401, M527, M5217A) never match.
+const ENGINES = new Set(('M10 M20 M21 M30 M40 M41 M42 M43 M44 M47 M50 M51 M52 M54 M56 M57 M60 M62 M67 M70 M73 M88 ' +
+  'N12 N13 N14 N16 N18 N20 N26 N40 N42 N43 N45 N46 N47 N51 N52 N53 N54 N55 N57 N62 N63 N73 N74 ' +
+  'S14 S38 S50 S52 S54 S55 S58 S62 S63 S65 S85 B36 B37 B38 B46 B47 B48 B57 B58').split(' '))
+// suffixes seen on those codes: TUE/TÜ (technical update), KP, R, displacement (B32, D20T1), H60, O1/T1/U0
+const ENGINE_SUFFIX = /^(?:|R|N|KP|TUE?2?(?:TOP)?|TÜ\d?|[BDH]\d{2}(?:[A-Z]\d)?|[OTU]\d)$/
+// a module that names the engine of the car it is fitted to (ASC/DSC, gearbox, cluster, Valvetronic), not its own
+const FITTED = /Antiblockier|Stabilit|Getriebe|Kombi|Instrument|Ventiltrieb/i
+// a code straight after the Siemens unit prefix 'MS '/'MSS_' names the unit ('MS S65' runs the S85), not the
+// engine; a lowercase power class after the code ('N47uL', 'M57TUE2oL') is read and dropped
+const ENGINE_RE = /(?<![A-Za-z0-9])(?<!MSS?[ _])([MNSB]\d{2})([A-Z0-9ÜÄ]*)(?:[uok]L)?(?![A-Za-z0-9ÄÖÜäöü])/g
+function engineCodes(text){ const out = []
+  for (const [, base, suffix] of String(text).matchAll(ENGINE_RE))
+    if (ENGINES.has(base) && ENGINE_SUFFIX.test(suffix) && !out.some(o => o.variant === base + suffix)) out.push({ base, variant: base + suffix })
+  return out }
+SQL(`CREATE TABLE ecu_engine(sgbd TEXT, engine TEXT, engine_variant TEXT, relation TEXT, source TEXT)`)
+{ const ins = db.prepare('INSERT INTO ecu_engine(sgbd,engine,engine_variant,relation,source) VALUES(?,?,?,?,?)')
+  const routeNames = db.prepare("SELECT DISTINCT ecu_name FROM routing WHERE sgbd=? AND COALESCE(ecu_name,'')<>'' ORDER BY 1")
+  SQL('BEGIN'); let n = 0, nr = 0
+  for (const r of db.prepare('SELECT sgbd, ecu_name FROM ecu_variant ORDER BY sgbd').all()){
+    let hits = r.ecu_name ? engineCodes(r.ecu_name).map(c => ({ ...c, text: r.ecu_name, source: 'ecu_name' })) : []
+    // fallback: an ECU whose own name names no engine ('ME9.2 fuer NG-Motoren') takes it from BMW's routing name
+    if (!hits.length) for (const rn of routeNames.all(r.sgbd).map(x => x.ecu_name))
+      for (const c of engineCodes(rn)) if (!hits.some(h => h.variant === c.variant)) hits.push({ ...c, text: rn, source: 'routing' })
+    for (const h of hits){ ins.run(r.sgbd, h.base, h.variant, FITTED.test(h.text) ? 'fitted_with' : 'engine_ecu', h.source); h.source === 'routing' ? nr++ : n++ } }
+  SQL('COMMIT'); console.log('  engine codes from ecu_name:', n, '| from routing names:', nr) }
 
 // ---------- dimension tables ----------
 SQL(`
@@ -273,10 +359,13 @@ const CAN_NODE_MAP = { DSC:'DSC',DME:'DME',DDE1:'DDE',EGS:'EGS',SZL:'SZL',JBBF:'
   const node = {}
   const touch = (n)=>{ if(!n) return null; n=String(n).toUpperCase(); node[n] = node[n] || {node:n,has_diag:0,has_routing:0,has_can:0,has_ds2:0,has_coding:0,variant_count:0}; return node[n] }
   for (const r of db.prepare('SELECT ecu_family, COUNT(*) c FROM ecu_variant WHERE ecu_family IS NOT NULL GROUP BY ecu_family').all()){ const x=touch(r.ecu_family); if(x){x.has_diag=1; x.variant_count=r.c} }
-  for (const r of db.prepare("SELECT DISTINCT ecu_group FROM routing WHERE ecu_group IS NOT NULL").all()){ const g=r.ecu_group.replace(/^[GD]_/,''); const x=touch(g); if(x) x.has_routing=1 }
+  // routed when any member variant has a routing row; the group name is the node only when the member has no family
+  for (const r of db.prepare("SELECT DISTINCT r.ecu_group, v.ecu_family FROM routing r LEFT JOIN ecu_variant v ON v.sgbd=r.sgbd WHERE r.ecu_group IS NOT NULL ORDER BY 1,2").all()){
+    const x = touch(r.ecu_family && r.ecu_family !== 'C' ? r.ecu_family : r.ecu_group.replace(/^[GDH]_/,'')); if(x) x.has_routing=1 }
   for (const fam of Object.values(CAN_NODE_MAP)){ const x=touch(fam); if(x) x.has_can=1 }
-  for (const r of db.prepare("SELECT DISTINCT ecu FROM ds2_job").all()){ const x=touch(r.ecu); if(x) x.has_ds2=1 }
-  for (const r of db.prepare("SELECT DISTINCT ecu_module FROM coding_example WHERE ecu_module IS NOT NULL").all()){ const x=touch(String(r.ecu_module).replace(/[0-9_].*$/,'')); if(x) x.has_coding=1 }
+  for (const r of db.prepare("SELECT DISTINCT ecu FROM ds2_job ORDER BY 1").all()){ const x=touch(family(r.ecu)); if(x) x.has_ds2=1 }
+  // the coded module's own variant family when it resolves (63DMO -> dde731 -> DDE), else its name
+  for (const r of db.prepare("SELECT DISTINCT c.ecu_module, v.ecu_family FROM coding_example c LEFT JOIN ecu_variant v ON v.sgbd=c.sgbd WHERE c.ecu_module IS NOT NULL ORDER BY 1,2").all()){ const x=touch(r.ecu_family || family(r.ecu_module)); if(x) x.has_coding=1 }
   const ins = db.prepare('INSERT OR REPLACE INTO ecu_node(node,label,has_diag,has_routing,has_can,has_ds2,has_coding,variant_count) VALUES(?,?,?,?,?,?,?,?)')
   SQL('BEGIN'); for(const x of Object.values(node)) ins.run(x.node,x.node,x.has_diag,x.has_routing,x.has_can,x.has_ds2,x.has_coding,x.variant_count); SQL('COMMIT')
 }
@@ -313,12 +402,39 @@ SQL(`UPDATE ecu_variant SET has_routing =
   }
 }
 
-// ---------- merge English fault text into dtc, but ONLY genuine translations (text must differ from German) ----------
+// ---------- merge English fault text into dtc, but ONLY genuine translations ----------
 console.log('English DTC join ...')
-SQL(`UPDATE dtc SET
-  location_text_en = (SELECT e.location_text_en FROM english_dtc e WHERE e.sgbd=dtc.sgbd AND e.code=dtc.code AND e.lang IN ('en','mixed') AND e.location_text_en IS NOT NULL AND e.location_text_en <> dtc.location_text ORDER BY (e.lang='en') DESC LIMIT 1),
-  en_lang = (SELECT e.lang FROM english_dtc e WHERE e.sgbd=dtc.sgbd AND e.code=dtc.code AND e.lang IN ('en','mixed') AND e.location_text_en IS NOT NULL AND e.location_text_en <> dtc.location_text ORDER BY (e.lang='en') DESC LIMIT 1)
-  WHERE EXISTS (SELECT 1 FROM english_dtc e WHERE e.sgbd=dtc.sgbd AND e.code=dtc.code AND e.lang IN ('en','mixed') AND e.location_text_en IS NOT NULL AND e.location_text_en <> dtc.location_text)`)
+{ // 1) EnglishEcu tables that drift out of step with their codes (the text carries another code's
+  //    '5DD5 -' prefix) are cut from the first drifted row on; 3+ drifted rows within 20 = a shifted table.
+  const hexOf = (code) => String(code||'').replace(/^0x/i,'').toUpperCase().padStart(4,'0')
+  const PFX = /^\s*([0-9A-F]{4})\s*\??\s*-/i
+  const rows = db.prepare("SELECT rowid id, sgbd, code, location_text_en t, source_table st FROM english_dtc ORDER BY sgbd, source_table, rowid").all()
+  const cut = new Set(); let i = 0
+  while (i < rows.length) { let j = i; while (j < rows.length && rows[j].sgbd === rows[i].sgbd && rows[j].st === rows[i].st) j++
+    const bad = []; for (let k = i; k < j; k++){ const m = PFX.exec(rows[k].t||''); const h = hexOf(rows[k].code); if (m && h.length === 4 && m[1].toUpperCase() !== h) bad.push(k) }
+    for (let b = 0; b + 2 < bad.length; b++) if (bad[b+2] - bad[b] < 20){ for (let k = bad[b]; k < j; k++) cut.add(rows[k].id)
+      console.log(`  ${rows[i].sgbd} ${rows[i].st}: English out of step with codes from ${rows[bad[b]].code}, ${j - bad[b]} rows dropped`); break }
+    i = j }
+  const del = db.prepare('DELETE FROM english_dtc WHERE rowid=?'); SQL('BEGIN'); for (const id of cut) del.run(id); SQL('COMMIT')
+  // 2) per fault row: same-table English first; another table's English only when that table has no German
+  //    for the code or the same German (ignoring a leading numeric id such as '0x29F7 10742 ...'); never
+  //    text that equals the German apart from a code prefix, case or spacing.
+  const norm = (x) => String(x||'').replace(/^(0x)?[0-9A-F]{4,8}\s*\??\s*-?\s*/i,'').replace(/\s+/g,' ').trim().toLowerCase()
+  const sameDe = (x, y) => x == null || norm(x).replace(/^\d+\s+/, '') === norm(y).replace(/^\d+\s+/, '')
+  const en = new Map()
+  for (const e of db.prepare("SELECT sgbd, code, location_text_en t, lang, source_table st FROM english_dtc WHERE lang IN ('en','mixed') AND location_text_en IS NOT NULL ORDER BY rowid").all()){
+    const k = e.sgbd + '|' + e.code; if (!en.has(k)) en.set(k, []); en.get(k).push(e) }
+  const de = new Map()
+  for (const d of db.prepare('SELECT sgbd, code, location_text, source_table FROM dtc').all()) de.set(d.sgbd+'|'+d.code+'|'+d.source_table, d.location_text)
+  const up = db.prepare('UPDATE dtc SET location_text_en=?, en_lang=? WHERE rowid=?')
+  SQL('BEGIN'); let n = 0
+  for (const d of db.prepare('SELECT rowid id, sgbd, code, location_text, source_table FROM dtc ORDER BY rowid').all()){
+    const cands = (en.get(d.sgbd+'|'+d.code) || []).filter(e => norm(e.t) !== norm(d.location_text) &&
+      (e.st === d.source_table || sameDe(de.get(d.sgbd+'|'+d.code+'|'+e.st), d.location_text)))
+    if (!cands.length) continue
+    cands.sort((a, b) => (b.st === d.source_table) - (a.st === d.source_table) || (b.lang === 'en') - (a.lang === 'en'))
+    up.run(cands[0].t, cands[0].lang, d.id); n++ }
+  SQL('COMMIT'); console.log('  dtc rows with English:', n) }
 
 // ---------- complete the fault model: type (ART) + freeze-frame environment (with scaling) ----------
 // A BMW fault = location code (ORT -> dtc) + type/status code (ART -> dtc_type). Freeze-frame values
@@ -338,7 +454,7 @@ SQL(`CREATE TABLE dtc_env(sgbd TEXT, code TEXT, text TEXT, unit TEXT, name TEXT,
   const qRows = db.prepare('SELECT cells FROM table_row WHERE sgbd=? AND "table"=? ORDER BY idx')
   const ins = db.prepare('INSERT INTO dtc_env(sgbd,code,text,unit,name,mul,div,add_offset,source_table) VALUES(?,?,?,?,?,?,?,?,?)')
   // scaling factors are numeric or absent: map placeholders ('-','--','?','') to NULL; treat div=0 as missing
-  const numOrNull = (v) => { if (v == null) return null; const s = String(v).trim(); return /^-?\d*\.?\d+$/.test(s) ? s : null }
+  const numOrNull = (v) => { if (v == null) return null; const s = String(v).trim().replace(',', '.'); return /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s) ? s : null }   // '0,75' and '3,05E-5' are numbers
   const divOrNull = (v) => { const s = numOrNull(v); return (s !== null && parseFloat(s) === 0) ? null : s }
   SQL('BEGIN'); let n = 0
   for (const t of envTabs) {
@@ -347,12 +463,20 @@ SQL(`CREATE TABLE dtc_env(sgbd TEXT, code TEXT, text TEXT, unit TEXT, name TEXT,
     const idx = {}
     for (const [field, names] of Object.entries(alias)) { idx[field] = -1; for (const nm of names){ const i = up.indexOf(nm); if (i >= 0){ idx[field] = i; break } } }
     if (idx.code < 0) idx.code = 0
-    for (const r of qRows.all(t.sgbd, t.name)) {
+    const rowsAll = qRows.all(t.sgbd, t.name)
+    // older layouts carry the scale as UWF_A (factor) and UWF_B (offset): raw*A + B. Mapped only when
+    // there is no third factor, or UWF_C is just a 0/1 flag; where C is a divisor (bms*) it stays NULL.
+    const ia = up.findIndex(c => c === 'UWF_A' || c === 'UW_A'), ib = up.findIndex(c => c === 'UWF_B' || c === 'UW_B'), ic = up.indexOf('UWF_C')
+    if (idx.mul < 0 && idx.div < 0 && idx.add_offset < 0 && ia >= 0 && ib >= 0 && (ic < 0 ||
+        rowsAll.every(r => { try { return ['0','1'].includes(String(JSON.parse(r.cells)[ic]).trim()) } catch { return false } }))) { idx.mul = ia; idx.add_offset = ib; idx.uwf = true }
+    for (const r of rowsAll) {
       let cells; try { cells = JSON.parse(r.cells) } catch { continue }
       const g = (i) => (i >= 0 && i < cells.length) ? cells[i] : null
       const code = g(idx.code)
       if (code != null && /[XY?y]/.test(String(code))) continue   // skip unfilled source templates
-      ins.run(t.sgbd, code, g(idx.text), g(idx.unit), g(idx.name), numOrNull(g(idx.mul)), divOrNull(g(idx.div)), numOrNull(g(idx.add_offset)), t.name); n++
+      let mul = numOrNull(g(idx.mul)), add = numOrNull(g(idx.add_offset))
+      if (idx.uwf && mul !== null && parseFloat(mul) === 0) { mul = null; add = null }   // UWF_A 0 = status or placeholder field, not a scale
+      ins.run(t.sgbd, code, g(idx.text), g(idx.unit), g(idx.name), mul, divOrNull(g(idx.div)), add, t.name); n++
     }
   }
   SQL('COMMIT'); console.log('  dtc_env (header-aware):', n)
@@ -386,7 +510,11 @@ SQL(`INSERT INTO search(kind,key,text) SELECT 'dtc', sgbd||':'||code, location_t
 SQL(`INSERT INTO search(kind,key,text) SELECT 'ecu', sgbd, ecu_name FROM ecu_variant WHERE ecu_name IS NOT NULL;`)
 SQL(`INSERT INTO search(kind,key,text) SELECT 'job', sgbd||':'||name, description FROM job WHERE description IS NOT NULL;`)
 SQL(`INSERT INTO search(kind,key,text) SELECT 'coding', ecu||':'||fsw_label, COALESCE(meaning,fsw_label) FROM coding_label;`)
-SQL(`INSERT INTO search(kind,key,text) SELECT 'dtc_en', sgbd||':'||code, location_text_en FROM english_dtc WHERE lang IN ('en','mixed') AND location_text_en IS NOT NULL;`)
+// English index: skip text that is only the German again (same rule as the dtc merge)
+db.function('norm_txt', { deterministic: true }, (x) => String(x ?? '').replace(/^(0x)?[0-9A-F]{4,8}\s*\??\s*-?\s*/i,'').replace(/\s+/g,' ').trim().toLowerCase())
+SQL(`INSERT INTO search(kind,key,text) SELECT 'dtc_en', e.sgbd||':'||e.code, e.location_text_en FROM english_dtc e
+  WHERE e.lang IN ('en','mixed') AND e.location_text_en IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM dtc d WHERE d.sgbd=e.sgbd AND d.code=e.code AND norm_txt(d.location_text)=norm_txt(e.location_text_en));`)
 SQL(`INSERT INTO search(kind,key,text) SELECT 'option', code, meaning FROM option_code WHERE meaning IS NOT NULL;`)
 SQL(`INSERT INTO search(kind,key,text) SELECT 'coding_fsw', chassis||':'||fsw_label, fsw_label FROM coding_variant;`)
 SQL(`INSERT INTO search(kind,key,text) SELECT 'measurement', sgbd||':'||COALESCE(result,''), label FROM measurement WHERE label IS NOT NULL;`)
@@ -418,10 +546,17 @@ SQL("INSERT INTO ecu_alias SELECT 'family', ecu_family, sgbd FROM ecu_variant WH
 SQL("INSERT INTO ecu_alias SELECT DISTINCT 'ecu_group', ecu_group, sgbd FROM routing WHERE ecu_group IS NOT NULL")
 SQL("INSERT INTO ecu_alias SELECT DISTINCT 'sgbd_index', sgbd_index, sgbd FROM routing WHERE sgbd_index IS NOT NULL")
 SQL("INSERT INTO ecu_alias SELECT DISTINCT 'diag_address', diag_address, sgbd FROM routing WHERE diag_address IS NOT NULL")
-SQL("INSERT INTO ecu_alias SELECT DISTINCT 'hwnr', hwnr, sgbd FROM ecu_hwnr WHERE hwnr IS NOT NULL AND sgbd IS NOT NULL")
+// placeholder part numbers stay in ecu_hwnr (source data) but do not resolve to an ECU
+SQL("INSERT INTO ecu_alias SELECT DISTINCT 'hwnr', hwnr, sgbd FROM ecu_hwnr WHERE hwnr IS NOT NULL AND sgbd IS NOT NULL AND hwnr NOT IN ('0000000','0000001','0000002','1111111','9876543')")
 SQL("INSERT INTO ecu_alias SELECT DISTINCT 'ecu_type', ecu_type, sgbd FROM ecu_hwnr WHERE ecu_type IS NOT NULL AND sgbd IS NOT NULL")
 SQL("INSERT INTO ecu_alias SELECT DISTINCT 'ecu_type', ecu_type, sgbd FROM flash_map WHERE ecu_type IS NOT NULL AND sgbd IS NOT NULL")
+SQL("INSERT INTO ecu_alias SELECT DISTINCT 'engine', engine, sgbd FROM ecu_engine")
+SQL("INSERT INTO ecu_alias SELECT DISTINCT 'engine', engine_variant, sgbd FROM ecu_engine WHERE engine_variant<>engine")
+// one row per (type, alias, sgbd): ecu_hwnr and flash_map both list most ecu_types
+SQL("CREATE TABLE ecu_alias_d AS SELECT DISTINCT alias_type, alias, sgbd FROM ecu_alias ORDER BY alias_type, alias, sgbd")
+SQL("DROP TABLE ecu_alias"); SQL("ALTER TABLE ecu_alias_d RENAME TO ecu_alias")
 SQL("CREATE INDEX ix_alias ON ecu_alias(alias)")
+SQL("CREATE INDEX ix_alias_nocase ON ecu_alias(alias COLLATE NOCASE)")
 SQL("CREATE INDEX ix_alias_type ON ecu_alias(alias_type, alias)")
 // derived ECU diagnostic address for OBDb live signals: UDS response header 0x6XX -> address XX (0x6F1 = tester, skip)
 { const rows = db.prepare("SELECT rowid, ecu_header FROM obd_signal WHERE ecu_header IS NOT NULL").all()
@@ -433,13 +568,15 @@ console.log('Unification views ...')
 SQL(`CREATE VIEW v_ecu AS
   SELECT v.sgbd, v.ecu_name, v.ecu_family, v.chassis, v.protocol, v.is_uds, v.job_count, v.table_count,
     v.is_stub, v.has_local_binary, v.has_coding, v.has_coding_data, v.coding_example_count, v.has_routing,
-    (SELECT r.ecu_group FROM routing r WHERE r.sgbd=v.sgbd LIMIT 1) AS ecu_group,
-    (SELECT r.diag_address FROM routing r WHERE r.sgbd=v.sgbd LIMIT 1) AS diag_address,
-    (SELECT r.sgbd_index FROM routing r WHERE r.sgbd=v.sgbd LIMIT 1) AS sgbd_index,
+    (SELECT r.ecu_group FROM routing r WHERE r.sgbd=v.sgbd ORDER BY (r.source='prg') DESC, r.ecu_group, r.sgbd_index LIMIT 1) AS ecu_group,
+    (SELECT r.diag_address FROM routing r WHERE r.sgbd=v.sgbd ORDER BY (r.source='prg') DESC, r.ecu_group, r.sgbd_index LIMIT 1) AS diag_address,
+    (SELECT r.sgbd_index FROM routing r WHERE r.sgbd=v.sgbd ORDER BY (r.source='prg') DESC, r.ecu_group, r.sgbd_index LIMIT 1) AS sgbd_index,
+    (SELECT COUNT(*) FROM routing r WHERE r.sgbd=v.sgbd) AS routing_count,
     (SELECT b.bus FROM ecu_bus b WHERE b.scope='sgbd' AND b.key=v.sgbd LIMIT 1) AS bus,
     (SELECT COUNT(*) FROM dtc d WHERE d.sgbd=v.sgbd) AS dtc_count,
     (SELECT COUNT(*) FROM measurement m WHERE m.sgbd=v.sgbd) AS measurement_count,
-    (SELECT COUNT(*) FROM ecu_hwnr h WHERE h.sgbd=v.sgbd) AS hwnr_count
+    (SELECT COUNT(*) FROM ecu_hwnr h WHERE h.sgbd=v.sgbd) AS hwnr_count,
+    (SELECT group_concat(engine, ',') FROM (SELECT DISTINCT e.engine FROM ecu_engine e WHERE e.sgbd=v.sgbd ORDER BY e.engine)) AS engines
   FROM ecu_variant v`)
 SQL(`CREATE VIEW v_fault AS
   SELECT d.sgbd, d.code AS location_code, d.location_text, d.location_text_en, d.event_dtc, d.source_table
@@ -474,13 +611,14 @@ SQL(`CREATE VIEW v_measurement AS
   UNION ALL
   SELECT NULL AS sgbd, NULL AS job, did_or_pid AS result, name AS label, unit, scale, offset, 'obdb:'||COALESCE(source_repo,'') AS source FROM obd_signal`)
 SQL(`CREATE VIEW v_vehicle_ecu AS
-  SELECT ve.chassis, ve.ecu_group, ve.sgbd, (SELECT ecu_name FROM ecu_variant v WHERE v.sgbd=ve.sgbd) AS ecu_name
+  SELECT ve.chassis, ve.ecu_group, ve.sgbd, (SELECT ecu_name FROM ecu_variant v WHERE v.sgbd=ve.sgbd) AS ecu_name,
+    ve.ecu_variant, ve.cbd, ve.source_file
   FROM vehicle_ecu ve`)
 
 // ---------- meta / provenance ----------
 SQL(`CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);`)
 const stats = {}
-for (const t of Object.keys(TABLES).concat(['ecu_node','chassis','ecu_group','ecu_family_dim','dtc_type','dtc_env','dtc_class','ecu_alias'])) {
+for (const t of Object.keys(TABLES).concat(['ecu_node','chassis','ecu_group','ecu_family_dim','dtc_type','dtc_env','dtc_class','ecu_alias','ecu_engine'])) {
   stats[t] = db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c
 }
 const variantTotal = db.prepare('SELECT COUNT(*) c FROM ecu_variant').get().c
@@ -499,7 +637,7 @@ const coverage = {
   supports_coding_service_flag: pct("SELECT COUNT(*) c FROM ecu_variant WHERE has_coding=1"),
   coding_catalog_note: 'bulk coding lives in coding_variant (17,169 chassis-wide labels), not per-ECU; the low with_coding_data % is expected',
   dtc_rows_with_english: `${db.prepare('SELECT COUNT(*) c FROM dtc WHERE location_text_en IS NOT NULL').get().c}/${db.prepare('SELECT COUNT(*) c FROM dtc').get().c}`,
-  applicability_scope: 'vehicle_ecu / option_code are E-series + MINI only (SP-DATEN). No F/G/I/U.',
+  applicability_scope: 'vehicle_ecu is E-series + MINI only (SP-DATEN); option_code also holds BMW Motorrad AT files (K24, KH2, K1X). No F/G/I/U.',
   can_scope: 'can_* covers chassis group E8x_E9x only; ds2_* covers ECU MS43 only.',
   bus_confidence: 'ecu_bus per-ECU rows are heuristic (group-name based); see confidence column. CAN-message buses are high-confidence.',
 }
@@ -518,6 +656,7 @@ SQL(`CREATE TABLE data_source(layer TEXT, tables TEXT, origin TEXT, upstream TEX
 const SOURCE_FILES = {
   'project': null,
   'bus-topology': '(derived: CAN node map + routing + can_message)',
+  'engine': '(derived: ecu_variant.ecu_name)',
   'diagnostics': 'decoded SGBD pages (one per ECU, keyed by sgbd)',
   'english': 'EnglishEcu/*.prg',
   'routing': 'T_GRTB.PRG',
@@ -539,6 +678,7 @@ const SOURCE_FILES = {
 const BMW = 'BMW AG proprietary (included for interoperability / right-to-repair; removable on request)'
 const DATA_SOURCES = [
   ['project','assemble.mjs, parsers/*, schema, ecu_node, ecu_alias, ecu_group, chassis*, ecu_*_dim, meta, search, data_source, all v_* views','This project (original work)','(this repo)','MIT','MIT','Permissive. The schema, parsers, cross-links, identity resolver, dimensions, and the compilation itself.','Schema design, parsing, normalization, cross-layer unification.'],
+  ['engine','ecu_engine','Derived: engine codes named in BMW\'s own ECU names (ecu_variant.ecu_name, else routing.ecu_name)','(derived in this repo)',BMW,'LicenseRef-BMW-proprietary','Only whitelisted BMW engine families are kept. relation=engine_ecu when the module is the engine controller, fitted_with when it names the engine of the car it is fitted to (ASC/DSC, gearbox).','Regex extraction from ecu_name, or from the routing name when ecu_name names no engine (source column); no outside source.'],
   ['bus-topology','ecu_bus','Derived: opendbc/openpilot CAN bus map + routing group names + can_message','(derived in this repo)','MIT (CAN source); BMW-derived group names','MIT','Per-ECU bus is heuristic from the routing group name; CAN-message buses are high-confidence. See the confidence column.','Derived from a CAN node map plus routing and can_message.'],
   ['diagnostics','ecu_variant, job, uds_service, job_arg, job_result, ecu_table, table_row, dtc, dtc_type, dtc_env, dtc_class','BMW EDIABAS SGBD, via ediabasx-docs-sgbd (emdzej)','github.com/emdzej/ediabasx-docs-sgbd',BMW,'LicenseRef-BMW-proprietary','BMW copyrighted.','Decoded SGBD Markdown parsed to relational tables; fault location/type/env/class derived from SGBD tables, env scaling mapped by column name.'],
   ['english','english_dtc, english_job','BMW EDIABAS EnglishEcu binaries, via bmw-advanced-tools','git.0x45.cz/em/bmw-advanced-tools',BMW,'LicenseRef-BMW-proprietary','BMW copyrighted.','PRG binaries decoded (XOR-0xF7) and parsed; only genuine English merged into dtc.'],
@@ -576,7 +716,7 @@ const variants = db.prepare('SELECT * FROM ecu_variant').all()
 const qJobs = db.prepare('SELECT name,description,mode,uds_services FROM job WHERE sgbd=? ORDER BY rowid')
 const qDtc = db.prepare('SELECT code,location_text,location_text_en,en_lang,event_dtc,source_table FROM dtc WHERE sgbd=?')
 const qTab = db.prepare('SELECT name,rows,cols,columns FROM ecu_table WHERE sgbd=?')
-const qRoute = db.prepare('SELECT ecu_group,diag_address,sgbd_index,source FROM routing WHERE sgbd=?')
+const qRoute = db.prepare("SELECT ecu_group,diag_address,sgbd_index,source FROM routing WHERE sgbd=? ORDER BY (source='prg') DESC, ecu_group, sgbd_index")
 const qCoding = db.prepare('SELECT source_car,fsw,psw,fsw_meaning,psw_meaning FROM coding_example WHERE sgbd=? AND COALESCE(is_meta,0)=0')
 const qBus = db.prepare("SELECT bus,confidence,also_on FROM ecu_bus WHERE scope='sgbd' AND key=?")
 const qType = db.prepare('SELECT code,type_text FROM dtc_type WHERE sgbd=?')
@@ -587,10 +727,12 @@ const qFlash = db.prepare('SELECT flash_program,sgid,programming_protocol,usage 
 const qClass = db.prepare('SELECT code,class_text FROM dtc_class WHERE sgbd=?')
 const qNetto = db.prepare('SELECT address,length,bytes,state FROM coding_netto WHERE sgbd=?')
 const qEnJob = db.prepare('SELECT job,description_en FROM english_job WHERE sgbd=?')
+const qEng = db.prepare('SELECT engine,engine_variant,relation,source FROM ecu_engine WHERE sgbd=? ORDER BY engine_variant')
 let written = 0
 for (const v of variants) {
   const bus = qBus.get(v.sgbd)
-  const doc = { ...v, chassis: safeJson(v.chassis), routing: qRoute.get(v.sgbd) || null,
+  const routes = qRoute.all(v.sgbd)
+  const doc = { ...v, chassis: safeJson(v.chassis), routing: routes[0] || null, routes,
     bus: bus ? { ...bus, also_on: safeJson(bus.also_on) } : null,
     jobs: qJobs.all(v.sgbd).map(j=>({ ...j, uds_services: safeJson(j.uds_services) })),
     tables: qTab.all(v.sgbd).map(t=>({ ...t, columns: safeJson(t.columns) })),
@@ -600,7 +742,8 @@ for (const v of variants) {
     hardware_numbers: qHwnr.all(v.sgbd), flash: qFlash.all(v.sgbd),
     coding_examples: qCoding.all(v.sgbd),
     coding_netto: qNetto.all(v.sgbd),
-    english_jobs: qEnJob.all(v.sgbd) }
+    english_jobs: qEnJob.all(v.sgbd),
+    engines: qEng.all(v.sgbd) }
   writeFileSync(path.join(DIST,'json','variants', v.sgbd + '.json'), JSON.stringify(doc))
   written++
 }

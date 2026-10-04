@@ -14,14 +14,19 @@ db.prepare('SELECT * FROM v_ecu WHERE sgbd = ?').get('acsm3')
 
 ## Resolve any identifier to its ECU
 
-A hardware part number, a routing group, a diagnostic address, an SGBD-index, or a family name all
-resolve through one table.
+A hardware part number, a routing group, a diagnostic address, an SGBD-index, an engine code, or a
+family name all resolve through one table.
 
 ```sql
 SELECT DISTINCT sgbd, ecu_name FROM v_resolve WHERE alias = '4028612';   -- part number
 SELECT DISTINCT sgbd FROM v_resolve WHERE alias = 'G_AIRBAG';            -- group
-SELECT DISTINCT sgbd FROM v_resolve WHERE alias = '0xF1020';             -- SGBD-index
+SELECT DISTINCT sgbd, ecu_name FROM v_resolve WHERE alias_type = 'engine' AND alias = 'N54';  -- engine
+SELECT DISTINCT sgbd FROM v_resolve WHERE alias_type = 'sgbd_index' AND alias = '0xF1020';
 ```
+
+Filter on `alias_type` for hex identifiers. A short value such as `0x12` is both a diagnostic address and
+a legacy variant id, so a bare lookup returns ECUs of both kinds. Matching is case-sensitive; add
+`COLLATE NOCASE` for a case-insensitive lookup (`WHERE alias = 'ACSM3' COLLATE NOCASE`).
 
 ## Everything about one ECU
 
@@ -43,7 +48,7 @@ The ECU reports a location code and a type code. Resolve each.
 
 ```sql
 SELECT location_text, location_text_en FROM v_fault WHERE sgbd = 'acsm3' AND location_code = '0x930900';
-SELECT type_text FROM dtc_type WHERE sgbd = 'acsm3' AND code = '0x05';
+SELECT DISTINCT type_text FROM dtc_type WHERE sgbd = 'acsm3' AND code = '0x05';
 ```
 
 For a generic OBD2 code that is not BMW-specific:
@@ -70,8 +75,24 @@ SELECT scope, scope_key, fsw_label, meaning_en, source FROM v_coding_all WHERE s
 ## Which ECUs a car has
 
 ```sql
-SELECT ecu_group, sgbd, ecu_name FROM v_vehicle_ecu WHERE chassis = 'E70';
+SELECT DISTINCT ecu_group, sgbd, ecu_variant, ecu_name FROM v_vehicle_ecu
+WHERE chassis = 'E70' AND source_file LIKE '%SGET%' ORDER BY ecu_group;
 ```
+
+The view has one row per chassis, group, variant, and coding data version (`cbd`), so `DISTINCT` folds the
+repeats. A NULL `sgbd` means SP-DATEN names no EDIABAS description file for that entry. Rows from the
+`*SGVT` files are version records and always have a NULL `sgbd`.
+
+Which engine ECUs a car can carry, with the engine each one names:
+
+```sql
+SELECT DISTINCT e.engine, e.sgbd, v.ecu_name
+FROM ecu_engine e JOIN ecu_variant v USING (sgbd) JOIN chassis_variant c USING (sgbd)
+WHERE c.chassis IN ('E90', 'E89') AND e.relation = 'engine_ecu' ORDER BY e.engine;
+```
+
+SP-DATEN files the E8x and E9x cars (E81 to E93, also E84 and E89) under the single code `E89`, so include
+`E89` when you ask about those chassis.
 
 ## Live measurements
 
@@ -89,7 +110,7 @@ year letter):
 
 ```sql
 SELECT make, brand, country FROM vin_wmi WHERE wmi = 'WBA';
-SELECT position, meaning FROM vin_position ORDER BY position;
+SELECT position, meaning FROM vin_position ORDER BY CAST(position AS INTEGER), position;
 ```
 
 ## Full-text search
